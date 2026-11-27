@@ -141,7 +141,8 @@ export function createFixedTrack() {
 export function candidate(seed, attempt) {
   const random = mulberry32(hashSeed(`${seed}/route/${attempt}`));
   const complexity = 0.25 + random() * 0.75;
-  const targetLength = 1100 + random() * 900;
+  // Bajadas cortas e intensas: menos metros, más curvas y más pendiente.
+  const targetLength = 640 + random() * 420;
   const raw = [{ x: 0, y: 0, z: 0 }];
   let x = 0;
   let z = 0;
@@ -151,17 +152,17 @@ export function candidate(seed, attempt) {
   const segments = [];
   while (distance < targetLength) {
     const choice = random();
-    let length = 80 + random() * 100;
+    let length = 70 + random() * 60;
     let turn = 0;
     let type = 'straight';
-    if (choice < 0.48) {
-      type = 'open-curve'; turn = (random() < 0.5 ? -1 : 1) * (0.85 + random() * 0.7); length = 95 + random() * 60;
-    } else if (choice < 0.76) {
-      type = 'hairpin'; turn = (random() < 0.5 ? -1 : 1) * (Math.PI * 0.82 + random() * 0.3); length = 150 + random() * 45;
-    } else if (choice < 0.91) {
-      type = 's-bend'; turn = (random() < 0.5 ? -1 : 1) * (0.9 + random() * 0.4); length = 145 + random() * 35;
+    if (choice < 0.5) {
+      type = 'open-curve'; turn = (random() < 0.5 ? -1 : 1) * (0.95 + random() * 0.8); length = 70 + random() * 45;
+    } else if (choice < 0.8) {
+      type = 'hairpin'; turn = (random() < 0.5 ? -1 : 1) * (Math.PI * 0.85 + random() * 0.3); length = 105 + random() * 40;
+    } else if (choice < 0.92) {
+      type = 's-bend'; turn = (random() < 0.5 ? -1 : 1) * (1 + random() * 0.5); length = 100 + random() * 35;
     } else {
-      type = 'straight'; length = 90 + random() * 90;
+      type = 'straight'; length = 70 + random() * 55;
     }
     const radius = Math.abs(turn) > 1e-6 ? length / Math.abs(turn) : Infinity;
     if (radius < MIN_RADIUS) length = Math.abs(turn) * (MIN_RADIUS + 3);
@@ -175,7 +176,7 @@ export function candidate(seed, attempt) {
       const ds = length / stepCount;
       x += -Math.sin(localHeading) * ds;
       z += -Math.cos(localHeading) * ds;
-      const grade = 0.055 + random() * 0.035;
+      const grade = 0.1 + random() * 0.05;
       y -= grade * ds;
       raw.push({ x, y, z });
       distance += ds;
@@ -186,18 +187,18 @@ export function candidate(seed, attempt) {
 
   const points = createPointsFromKnots(raw);
   const jumps = [];
-  const jumpSegments = segments.filter((segment) => segment.type === 'straight' && segment.length >= 90);
-  const jumpCount = Math.max(1, Math.min(3, Math.floor(distance / 520)));
+  const jumpSegments = segments.filter((segment) => segment.type === 'straight' && segment.length >= 75);
+  const jumpCount = Math.max(1, Math.min(2, Math.floor(distance / 420)));
   const selected = [];
   for (const segment of jumpSegments) {
     if (selected.length >= jumpCount) break;
-    const height = 1.4 + complexity * 0.3;
-    const rampLength = height / 0.08;
-    const desiredTakeoff = segment.startS + Math.max(32, Math.min(48, segment.length * 0.3));
+    const height = 1.2 + complexity * 0.35;
+    const rampLength = height / 0.07;
+    const desiredTakeoff = segment.startS + Math.max(26, Math.min(42, segment.length * 0.3));
     const takeoffS = Math.max(desiredTakeoff, segment.startS + rampLength + 4);
     const desiredJumpLength = 26 + random() * 10;
     const jumpLength = Math.min(desiredJumpLength, segment.endS - takeoffS - 5);
-    if (takeoffS < 120 || jumpLength < 20 || takeoffS - rampLength < segment.startS) continue;
+    if (takeoffS < 90 || jumpLength < 18 || takeoffS - rampLength < segment.startS) continue;
     if (selected.some((jump) => Math.abs(takeoffS - jump.takeoffS) < 180)) continue;
     selected.push({ takeoffS, landingS: takeoffS + jumpLength, runup: takeoffS - segment.startS, landing: 25, height, rampLength, type: random() < 0.5 ? 'table' : 'double' });
   }
@@ -250,7 +251,7 @@ function clamp01(value) {
 
 export function validateTrack(track) {
   if (!track || track.points.length < 3) return { valid: false, reason: 'too few samples' };
-  if (track.length < 1000 || track.length > 2200) return { valid: false, reason: `length ${track.length.toFixed(1)}m outside range` };
+  if (track.length < 560 || track.length > 1200) return { valid: false, reason: `length ${track.length.toFixed(1)}m outside range` };
   const cellSize = TRACK_WIDTH + SHOULDER_WIDTH;
   const occupied = new Map();
   const points = track.points;
@@ -274,7 +275,7 @@ export function validateTrack(track) {
     const p = points[i];
     const ds = Math.max(0.1, p.s - points[i - 1].s);
     const grade = Math.abs((p.y - points[i - 1].y) / ds);
-    if (grade > 0.18) return { valid: false, reason: `grade ${grade.toFixed(3)} exceeds limit` };
+    if (grade > 0.25) return { valid: false, reason: `grade ${grade.toFixed(3)} exceeds limit` };
     if (p.curvature > 1 / MIN_RADIUS * 3) return { valid: false, reason: `radius below limit near s=${p.s.toFixed(0)}m` };
   }
   if (!track.jumps.length) return { valid: false, reason: 'no safe straight available for a jump' };

@@ -6,7 +6,11 @@ const CAPTURE_KEYS = new Set([
   'ArrowLeft',
   'ArrowRight',
   'Space',
+  'KeyQ',
+  'KeyE',
 ]);
+
+export const JUMP_KEYS = ['Space', 'KeyQ', 'KeyE'];
 
 export class Input {
   constructor(canvas, { onKey } = {}) {
@@ -15,6 +19,7 @@ export class Input {
     this.yawDelta = 0;
     this.mouseSensitivity = 0.0022;
     this.locked = false;
+    this.jumpPressed = false;
     this.onKey = onKey ?? (() => {});
     this.onLockChange = null;
 
@@ -25,6 +30,7 @@ export class Input {
       }
       this.keys.add(e.code);
       this._touchKeys.delete(e.code);
+      if (JUMP_KEYS.includes(e.code)) this.jumpPressed = true;
       if (CAPTURE_KEYS.has(e.code)) e.preventDefault();
       this.onKey(e.code);
     };
@@ -83,6 +89,7 @@ export class Input {
       button.addEventListener('pointerdown', (event) => {
         event.preventDefault();
         this._touchKeys.add(key);
+        if (JUMP_KEYS.includes(key)) this.jumpPressed = true;
         button.setPointerCapture?.(event.pointerId);
       });
       button.addEventListener('pointerup', release);
@@ -96,7 +103,7 @@ export class Input {
     return this.keys.has(code) || this._touchKeys.has(code);
   }
 
-  /** -1 izquierda ... +1 derecha (A/D y flechas). */
+  /** -1 izquierda ... +1 derecha (A/D y flechas): solo rotan la bici en el aire. */
   steer() {
     let s = 0;
     if (this.down('KeyA') || this.down('ArrowLeft')) s -= 1;
@@ -110,6 +117,13 @@ export class Input {
     if (this.down('KeyW') || this.down('ArrowUp')) t += 1;
     if (this.down('KeyS') || this.down('ArrowDown')) t -= 1;
     return t;
+  }
+
+  /** ¿Se pidió un salto desde la última llamada? (Espacio, Q o E). */
+  consumeJump() {
+    const pressed = this.jumpPressed;
+    this.jumpPressed = false;
+    return pressed;
   }
 
   /** Rumbo acumulado por el ratón desde la última llamada. */

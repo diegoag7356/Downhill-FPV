@@ -12,9 +12,13 @@ const EYE_HEIGHT = 1.6;
 // con la velocidad y la bici sigue ganando metros por segundo, cada vez menos.
 export const SPEED_REFERENCE = 40;
 const PEDAL_FADE_SPEED = 60;
-const STEER_BUILD_RATE = 7.5;
-const STEER_RETURN_RATE = 4.2;
-const BASE_TURN_RATE = 2.2;
+// Resistencia de dirección: el rumbo pedido se acumula y se aplica a ritmo
+// limitado, con menos autoridad cuanto más rápido vas. El teclado no gira.
+const YAW_RATE = 2.35;
+const YAW_QUEUE_LIMIT = 1.9;
+// Giro libre de la bici en el aire (A/D o flechas).
+const AIR_SPIN_RATE = 5.6;
+const JUMP_IMPULSE = 6.3;
 const CONTROL_LOSS_ANGLE = Math.PI / 4;
 
 export class Player {
@@ -32,6 +36,8 @@ export class Player {
     this.roll = 0;
     this.driftAngle = 0;
     this.steerAngle = 0;
+    this.pendingYaw = 0;
+    this.airRoll = 0;
     this.lossOfControl = 0;
     this.impact = 0;
     this.prev = { x, y, z, yaw, pitch: 0 };
@@ -60,14 +66,27 @@ export class Player {
     if (Math.abs(this.driftAngle) > CONTROL_LOSS_ANGLE) this.lossOfControl = 0.55;
     else this.lossOfControl = Math.max(0, this.lossOfControl - dt);
     const controlScale = this.lossOfControl > 0 ? 0.28 : 1;
-    // El manillar no obedece al instante: se carga al girar y vuelve solo al
-    // centro al soltar. A más velocidad, más resistencia a cambiar de rumbo.
-    const steerInput = input.steer();
-    const steerRate = steerInput === 0 ? STEER_RETURN_RATE : STEER_BUILD_RATE;
-    const steerStep = steerRate * dt;
-    this.steerAngle += Math.max(-steerStep, Math.min(steerStep, steerInput - this.steerAngle));
-    const turnRate = BASE_TURN_RATE * Math.max(0.45, 1 - 0.5 * speedRatio);
-    this.yaw = wrapAngle(this.yaw - this.steerAngle * turnRate * controlScale * dt + input.consumeYawDelta());
+    // Solo el ratón gobierna el rumbo, y no obedece al instante: la petición se
+    // acumula y se aplica a ritmo limitado, así que el giro tiene resistencia y
+    // a más velocidad cuesta más meter la bici en la curva.
+    const requestedYaw = this.pendingYaw + (input.consumeYawDelta() ?? 0);
+    this.pendingYaw = Math.max(-YAW_QUEUE_LIMIT, Math.min(YAW_QUEUE_LIMIT, requestedYaw));
+    const yawAuthority = YAW_RATE * Math.max(0.32, 1 - 0.55 * speedRatio) * controlScale;
+    const maxYawStep = yawAuthority * dt;
+    const yawStep = Math.max(-maxYawStep, Math.min(maxYawStep, this.pendingYaw));
+    this.pendingYaw = (this.pendingYaw - yawStep) * Math.exp(-dt * 6);
+    this.steerAngle = maxYawStep > 0 ? yawStep / maxYawStep : 0;
+    this.yaw = wrapAngle(this.yaw + yawStep);
+
+    // En el aire A/D y las flechas rotan la bici sobre sí misma; en el suelo no
+    // gobiernan nada, así que nunca te desvían del trazado.
+    const spinInput = input.steer?.() ?? 0;
+    if (!this.grounded) {
+      this.airRoll = Math.max(-Math.PI * 2, Math.min(Math.PI * 2, this.airRoll + spinInput * AIR_SPIN_RATE * dt));
+    } else if (this.airRoll !== 0) {
+      this.airRoll *= Math.exp(-dt * 9);
+      if (Math.abs(this.airRoll) < 0.01) this.airRoll = 0;
+    }
 
     let vx = this.velX;
     let vz = this.velZ;
@@ -129,6 +148,12 @@ export class Player {
       return;
     }
 
+    // Salto manual: Espacio, Q o E. Vale en cualquier punto del trazado.
+    if (input.consumeJump?.()) {
+      this.vy = Math.max(this.vy, JUMP_IMPULSE);
+      this.grounded = false;
+    }
+
     if (this.grounded && startingSurface?.onTrack) {
       const jumped = terrain.track.jumps.find((jump) => {
         const launchS = jump.takeoffS - 3;
@@ -139,7 +164,7 @@ export class Player {
         const flightDistance = Math.max(8, jumped.landingS - startingSurface.s);
         const flightTime = Math.min(1.75, Math.max(0.55, flightDistance / Math.max(this.speed, 5)));
         const landingDeltaY = landing.y - (nextSurface?.height ?? this.y);
-        this.vy = Math.min(9, Math.max(2.2, (landingDeltaY + 0.5 * GRAVITY * flightTime ** 2) / flightTime));
+        this.vy = Math.min(10, Math.max(4.2, (landingDeltaY + 0.5 * GRAVITY * flightTime ** 2) / flightTime));
         this.grounded = false;
       }
       const ballisticY = this.y + this.vy * dt - 0.5 * GRAVITY * dt * dt;
