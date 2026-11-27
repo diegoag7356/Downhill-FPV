@@ -20,21 +20,24 @@ export const YAW_RATE_SLOW = 1.85;
 export const YAW_RATE_FAST = 0.78;
 const YAW_ACCEL = 6.4;
 const YAW_RECENTER = 5.6;
-// Inclinación: sale del giro real y de la velocidad, con tope duro.
-export const MAX_LEAN = 0.6;
-const LEAN_RATE = 3.8;
-const LEAN_RECENTER = 6.5;
+// Parado no se gira: la autoridad de dirección crece con la velocidad.
+const TURN_FULL_SPEED = 3.5;
+// Inclinación: sale del giro real y de la velocidad, con tope duro y una
+// entrada suave (nada de tumbar la bici de golpe).
+export const MAX_LEAN = 0.55;
+const LEAN_RATE = 2;
+const LEAN_RECENTER = 3.2;
 const CONTROL_LOSS_ANGLE = Math.PI / 4;
 
 // --- Rotación libre en el aire ----------------------------------------------
 // Cada eje tiene su propio régimen angular: acelera al pulsar, frena al soltar
-// y nunca pasa del tope (nada de giros instantáneos).
+// y nunca pasa del tope (nada de giros instantáneos), pero no hay tope de
+// ángulo: se puede dar una vuelta completa.
 export const AIR_SPIN_MAX = 3;
 const AIR_SPIN_ACCEL = 6.5;
 const AIR_SPIN_DAMP = 2.4;
 const AIR_LEVEL_RATE = 9;
-const AIR_PITCH_LIMIT = Math.PI * 0.8;
-const AIR_YAW_LIMIT = Math.PI * 0.55;
+const TAU = Math.PI * 2;
 
 const JUMP_IMPULSE = 6.3;
 // Caída máxima por frame que la rueda copia sin despegar: evita el rebote
@@ -101,7 +104,9 @@ export class Player {
 
     if (this.grounded) {
       const turnCommand = clamp(-steerInput + this.mouseTurn, -1, 1);
-      const maxYawRate = (YAW_RATE_SLOW + (YAW_RATE_FAST - YAW_RATE_SLOW) * speedRatio) * controlScale;
+      // Parado no hay giro: la autoridad llega con la velocidad.
+      const turnAuthority = clamp(currentSpeed / TURN_FULL_SPEED, 0, 1);
+      const maxYawRate = (YAW_RATE_SLOW + (YAW_RATE_FAST - YAW_RATE_SLOW) * speedRatio) * controlScale * turnAuthority;
       const targetYawRate = turnCommand * maxYawRate;
       const rateStep = (turnCommand !== 0 ? YAW_ACCEL : YAW_RECENTER) * dt;
       this.yawRate += clamp(targetYawRate - this.yawRate, -rateStep, rateStep);
@@ -127,9 +132,10 @@ export class Player {
       this.airRate.roll = spinAxis(this.airRate.roll, rollAxis, dt);
       this.airRate.pitch = spinAxis(this.airRate.pitch, pitchAxis, dt);
       this.airRate.yaw = spinAxis(this.airRate.yaw, yawAxis, dt);
+      // Sin topes de ángulo: se puede dar una vuelta completa (o varias).
       this.airRoll += this.airRate.roll * dt;
-      this.airPitch = clamp(this.airPitch + this.airRate.pitch * dt, -AIR_PITCH_LIMIT, AIR_PITCH_LIMIT);
-      this.airYaw = clamp(this.airYaw + this.airRate.yaw * dt, -AIR_YAW_LIMIT, AIR_YAW_LIMIT);
+      this.airPitch += this.airRate.pitch * dt;
+      this.airYaw += this.airRate.yaw * dt;
     } else if (this.airRoll !== 0 || this.airPitch !== 0 || this.airYaw !== 0) {
       // Al tocar suelo la bici vuelve sola a la vertical.
       for (const axis of ['roll', 'pitch', 'yaw']) this.airRate[axis] *= Math.exp(-dt * 14);
@@ -258,6 +264,11 @@ export class Player {
         this.airRate.roll = 0;
         this.airRate.pitch = 0;
         this.airRate.yaw = 0;
+        // Al tocar suelo se toma el ángulo equivalente más cercano: una vuelta
+        // completa queda a cero en vez de desenrollarse a cámara lenta.
+        this.airRoll -= Math.round(this.airRoll / TAU) * TAU;
+        this.airPitch -= Math.round(this.airPitch / TAU) * TAU;
+        this.airYaw -= Math.round(this.airYaw / TAU) * TAU;
         this.pitch = nextSurface.pitch;
       }
     } else {
