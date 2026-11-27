@@ -1,10 +1,22 @@
 import * as THREE from 'three';
 import { mulberry32, hashSeed } from './rng.js';
-import { TRACK_WIDTH, SHOULDER_WIDTH } from './trackgen.js';
+import { TRACK_WIDTH, SHOULDER_WIDTH, CORRIDOR_HALF, corridorHeight } from './trackgen.js';
 
-const BAND = 7;
-const VALLEY = 38;
-const BERM_LATERAL = TRACK_WIDTH / 2 + 1.5;
+// Laterales donde el perfil cambia de pendiente. La malla usa los mismos
+// breakpoints que la colisión, así que lo que se ve es lo que se pisa.
+const EDGES = [
+  0,
+  TRACK_WIDTH / 2,
+  TRACK_WIDTH / 2 + 1.7,
+  TRACK_WIDTH / 2 + 3.5,
+  TRACK_WIDTH / 2 + SHOULDER_WIDTH,
+  TRACK_WIDTH / 2 + SHOULDER_WIDTH + 7,
+  CORRIDOR_HALF,
+  CORRIDOR_HALF + 12,
+  60,
+];
+const SKIRT = CORRIDOR_HALF + 12;
+const SKIRT_DROP = -78;
 
 export function createTrackMeshes(track, { visual = false } = {}) {
   const root = new THREE.Group();
@@ -30,40 +42,50 @@ export function createTrackMeshes(track, { visual = false } = {}) {
     banner: new THREE.MeshLambertMaterial({ color: 0xd2692f }),
   };
 
-  const shoulder = TRACK_WIDTH / 2 + SHOULDER_WIDTH;
-  const outer = shoulder + BAND;
-  const far = outer + VALLEY;
-  const widths = [-far, -outer, -shoulder, -TRACK_WIDTH / 2, TRACK_WIDTH / 2, shoulder, outer, far];
-  const lifts = [-22, -4.2, 0.1, 0.02, 0.02, 0.1, -4.2, -22];
+  // Bandas laterales del corredor: calzada, peralte/arcén, talud, falda y el
+  // faldón que se hunde para que no se vea el borde del mundo.
   const bands = [
-    { start: 0, end: 1, material: 'earth', tone: 1.1 },
-    { start: 1, end: 2, material: 'earth', tone: 0.55 },
-    { start: 2, end: 3, material: 'edge', tone: 0.1 },
-    { start: 3, end: 4, material: 'trail', tone: 0 },
-    { start: 4, end: 5, material: 'edge', tone: 0.1 },
-    { start: 5, end: 6, material: 'earth', tone: 0.55 },
-    { start: 6, end: 7, material: 'earth', tone: 1.1 },
+    { from: 1, to: 2, material: 'edge', tone: 0.1 },
+    { from: 2, to: 3, material: 'edge', tone: 0.1 },
+    { from: 3, to: 4, material: 'edge', tone: 0.1 },
+    { from: 4, to: 5, material: 'earth', tone: 0.4 },
+    { from: 5, to: 6, material: 'earth', tone: 0.7 },
+    { from: 6, to: 7, material: 'earth', tone: 1.1 },
+    { from: 7, to: 8, material: 'earth', tone: 0.9, skirt: true },
   ];
   for (const band of bands) {
-    const geometry = buildRibbon(track, widths[band.start], widths[band.end], lifts[band.start], lifts[band.end], {
-      seed: `${track.id}/${band.material}/${band.start}`,
-      tone: band.tone,
+    for (const side of [-1, 1]) {
+      const a = EDGES[band.from] * side;
+      const b = EDGES[band.to] * side;
+      const geometry = buildRibbon(track, a, b, {
+        seed: `${track.id}/${band.material}/${band.from}/${side}`,
+        tone: band.tone,
+        skirt: band.skirt,
+      });
+      root.add(new THREE.Mesh(geometry, materials[band.material]));
+    }
+  }
+  // La calzada.
+  {
+    const geometry = buildRibbon(track, -EDGES[1], EDGES[1], {
+      seed: `${track.id}/trail/full`,
+      tone: 0,
     });
-    root.add(new THREE.Mesh(geometry, materials[band.material]));
+    root.add(new THREE.Mesh(geometry, materials.trail));
   }
   // Surcos de rueda sobre la cinta.
   for (const offset of [-1.05, 1.05]) {
-    const geometry = buildRibbon(track, offset - 0.34, offset + 0.34, 0.028, 0.028, {
+    const geometry = buildRibbon(track, offset - 0.34, offset + 0.34, {
       seed: `${track.id}/rut/${offset}`,
       tone: 0,
       flat: true,
     });
     root.add(new THREE.Mesh(geometry, materials.rut));
   }
-  root.add(new THREE.Mesh(buildBerms(track), materials.berm));
 
   if (visual) {
     addSky(track, root, palette);
+    addBackdrop(track, root, palette);
     addGates(track, root, materials);
     addStakes(track, root, materials);
     addForest(track, root, { materials, palette });
@@ -128,7 +150,7 @@ function shade(hex, amount) {
   return color.lerp(target, Math.abs(amount)).getHex();
 }
 
-function buildRibbon(track, left, right, leftLift, rightLift, { seed = '', tone = 0, flat = false } = {}) {
+function buildRibbon(track, left, right, { seed = '', tone = 0, flat = false, skirt = false } = {}) {
   const positions = [];
   const colors = [];
   const uvs = [];
@@ -147,11 +169,13 @@ function buildRibbon(track, left, right, leftLift, rightLift, { seed = '', tone 
     const length = Math.max(1e-6, Math.hypot(dx, dz));
     const nx = -dz / length;
     const nz = dx / length;
-    const curveLift = flat ? 0 : Math.min(0.55, Math.abs(p.curvature) * 14);
-    const lY = p.y + leftLift + (p.curvature > 0 ? curveLift : 0);
-    const rY = p.y + rightLift + (p.curvature < 0 ? curveLift : 0);
-    positions.push(p.x + nx * left, lY, p.z + nz * left);
-    positions.push(p.x + nx * right, rY, p.z + nz * right);
+    const lift = (lateral) => {
+      if (flat) return p.y + 0.028;
+      if (skirt && Math.abs(lateral) >= SKIRT - 0.01) return p.y + SKIRT_DROP;
+      return corridorHeight(p.y, lateral, p.curvature ?? 0);
+    };
+    positions.push(p.x + nx * left, lift(left), p.z + nz * left);
+    positions.push(p.x + nx * right, lift(right), p.z + nz * right);
     color.setScalar(noise[i] + tone * 0.06);
     colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
     const v = p.s / 7;
@@ -165,64 +189,6 @@ function buildRibbon(track, left, right, leftLift, rightLift, { seed = '', tone 
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-// Peralte continuo: una pared que sigue la curva en el lado exterior.
-function buildBerms(track) {
-  const positions = [];
-  const colors = [];
-  const indices = [];
-  const color = new THREE.Color();
-  const active = [];
-  for (let i = 0; i < track.points.length; i++) {
-    const p = track.points[i];
-    active.push(Math.abs(p.curvature) > 0.005);
-  }
-  let stripStart = -1;
-  for (let i = 0; i <= track.points.length; i++) {
-    const on = i < track.points.length && active[i];
-    if (on && stripStart < 0) stripStart = i;
-    if (!on && stripStart >= 0) {
-      addBermStrip(stripStart, i - 1);
-      stripStart = -1;
-    }
-  }
-
-  function addBermStrip(from, to) {
-    if (to - from < 2) return;
-    const base = positions.length / 3;
-    for (let i = from; i <= to; i++) {
-      const p = track.points[i];
-      const before = track.points[Math.max(0, i - 1)];
-      const after = track.points[Math.min(track.points.length - 1, i + 1)];
-      const dx = after.x - before.x;
-      const dz = after.z - before.z;
-      const length = Math.max(1e-6, Math.hypot(dx, dz));
-      const nx = -dz / length;
-      const nz = dx / length;
-      const side = Math.sign(p.curvature) || 1;
-      const ramp = Math.min(1, (i - from) / 3, (to - i) / 3);
-      const height = (0.55 + Math.min(1.05, Math.abs(p.curvature) * 26)) * Math.max(0.15, ramp);
-      const innerX = p.x + nx * side * (TRACK_WIDTH / 2 - 0.15);
-      const innerZ = p.z + nz * side * (TRACK_WIDTH / 2 - 0.15);
-      const outerX = p.x + nx * side * (BERM_LATERAL);
-      const outerZ = p.z + nz * side * (BERM_LATERAL);
-      positions.push(innerX, p.y + 0.04, innerZ, outerX, p.y + height, outerZ);
-      color.setScalar(0.92 + Math.sin(i * 0.7) * 0.05);
-      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
-      if (i > from) {
-        const a = base + (i - from - 1) * 2;
-        indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-      }
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
@@ -251,6 +217,37 @@ function gateAt(track, s, root, materials, banner) {
 
 function addGates(track, root, materials) {
   gateAt(track, track.length - 10, root, materials, 'META');
+}
+
+// Cordillera de fondo: picos bajos alrededor de la bajada para que el horizonte
+// sea montaña y no una pared de niebla.
+function addBackdrop(track, root, palette) {
+  const random = mulberry32(hashSeed(`${track.id}/backdrop/v1`));
+  const start = track.points[0];
+  const end = track.points.at(-1);
+  const middle = { x: (start.x + end.x) / 2, z: (start.z + end.z) / 2 };
+  const group = new THREE.Group();
+  const rock = new THREE.MeshLambertMaterial({ color: palette.rock, flatShading: true });
+  const snow = new THREE.MeshLambertMaterial({ color: 0xe8eef2, flatShading: true });
+  const peaks = 14;
+  for (let i = 0; i < peaks; i++) {
+    const angle = (i / peaks) * Math.PI * 2 + random() * 0.25;
+    const radius = 420 + random() * 520;
+    const height = 180 + random() * 300;
+    const width = 120 + random() * 190;
+    const x = middle.x + Math.cos(angle) * radius;
+    const z = middle.z + Math.sin(angle) * radius;
+    const baseY = start.y - height * (0.55 + random() * 0.35);
+    const peak = new THREE.Mesh(new THREE.ConeGeometry(width, height, 5 + Math.floor(random() * 3), 1), rock);
+    peak.position.set(x, baseY + height / 2, z);
+    peak.rotation.y = random() * Math.PI;
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(width * 0.34, height * 0.3, 5, 1), snow);
+    cap.position.set(x, baseY + height * 0.86, z);
+    cap.rotation.y = peak.rotation.y;
+    group.add(peak, cap);
+  }
+  group.name = 'backdrop';
+  root.add(group);
 }
 
 // Cielo degradado: una cúpula de vértices barata que sustituye al color plano.
@@ -285,7 +282,7 @@ function addStakes(track, root, materials) {
       const lateral = side * (TRACK_WIDTH / 2 + SHOULDER_WIDTH - 0.4);
       positions.push({
         x: point.x + Math.cos(point.yaw) * lateral,
-        y: point.y,
+        y: corridorHeight(point.y, lateral, curvatureAt(track, s)),
         z: point.z - Math.sin(point.yaw) * lateral,
       });
     }
@@ -307,19 +304,15 @@ function addStakes(track, root, materials) {
   root.add(post, cap);
 }
 
+function curvatureAt(track, s) {
+  const index = Math.max(0, Math.min(track.points.length - 1, Math.round(s / track.step)));
+  return track.points[index]?.curvature ?? 0;
+}
+
 function addForest(track, root, { materials }) {
-  const random = mulberry32(hashSeed(`${track.id}/forest/v2`));
-  const trees = [];
-  for (let s = 10; s < track.length; s += 3.4 + random() * 4) {
-    const point = track.sampleAt(s);
-    const side = random() < 0.5 ? -1 : 1;
-    const lateral = side * (9 + random() * 50);
-    const scale = 0.7 + random() * 1.9;
-    const x = point.x + Math.cos(point.yaw) * lateral;
-    const z = point.z - Math.sin(point.yaw) * lateral;
-    const y = point.y - 0.4 - Math.max(0, Math.abs(lateral) - TRACK_WIDTH / 2 - SHOULDER_WIDTH) * 0.35;
-    trees.push({ x, y, z, scale, tint: random(), spin: random() * Math.PI * 2 });
-  }
+  // Los árboles salen del mismo listado que usa la colisión: los que se ven
+  // son exactamente los que te paran.
+  const trees = (track.scenery ?? []).filter((item) => item.kind === 'tree');
   const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.13, 0.26, 2.6, 5), materials.bark, trees.length);
   const layers = [
     new THREE.InstancedMesh(new THREE.ConeGeometry(1.35, 2.6, 6), materials.pine, trees.length),
@@ -360,7 +353,7 @@ function addShrubs(track, root, materials) {
     const lateral = side * (TRACK_WIDTH / 2 + 2.5 + random() * 9);
     items.push({
       x: point.x + Math.cos(point.yaw) * lateral,
-      y: point.y + 0.05,
+      y: corridorHeight(point.y, lateral, curvatureAt(track, s)) + 0.05,
       z: point.z - Math.sin(point.yaw) * lateral,
       scale: 0.35 + random() * 0.85,
       tint: random(),
@@ -385,20 +378,7 @@ function addShrubs(track, root, materials) {
 
 function addRocks(track, root, materials) {
   const random = mulberry32(hashSeed(`${track.id}/rocks/v2`));
-  const rocks = [];
-  for (let s = 20; s < track.length; s += 16 + random() * 22) {
-    const point = track.sampleAt(s);
-    const side = random() < 0.5 ? -1 : 1;
-    const lateral = side * (TRACK_WIDTH / 2 + 2 + random() * 14);
-    const scale = 0.4 + random() * 1.8;
-    rocks.push({
-      x: point.x + Math.cos(point.yaw) * lateral,
-      y: point.y + scale * 0.2,
-      z: point.z - Math.sin(point.yaw) * lateral,
-      scale,
-      rotation: random() * Math.PI,
-    });
-  }
+  const rocks = (track.scenery ?? []).filter((item) => item.kind === 'rock');
   const mesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), materials.rock, rocks.length);
   const dummy = new THREE.Object3D();
   rocks.forEach((rock, i) => {
@@ -423,7 +403,7 @@ function addGrass(track, root, materials) {
     const lateral = side * (edge - 0.8 + random() * 5.5);
     tufts.push({
       x: point.x + Math.cos(point.yaw) * lateral,
-      y: point.y + 0.02,
+      y: corridorHeight(point.y, lateral, curvatureAt(track, s)) + 0.02,
       z: point.z - Math.sin(point.yaw) * lateral,
       scale: 0.18 + random() * 0.42,
       tint: random(),
