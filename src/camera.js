@@ -1,4 +1,5 @@
-// Cámara FPV: aplica posición de ojos, rumbo (yaw) y pitch. El roll es siempre 0.
+// Cámara FPV: aplica posición de ojos, rumbo (yaw), pitch y roll. La cámara va
+// montada en la bici, así que acompaña su inclinación y su rotación.
 
 import * as THREE from 'three';
 
@@ -13,13 +14,11 @@ export function createCamera(aspect) {
 
 /**
  * Sincroniza la cámara con el jugador.
- * rotation.z se fuerza a 0 en cada frame: la vista gira, nunca se inclina.
+ * El roll llega ya ponderado desde el juego: la cámara acompaña a la bici.
  */
-export function updateCamera(camera, { position, yaw, pitch = 0 }) {
+export function updateCamera(camera, { position, yaw, pitch = 0, roll = 0 }) {
   const wrappedYaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
   camera.position.set(position.x, position.y, position.z);
-  camera.rotation.set(pitch, wrappedYaw, 0, 'YXZ');
-  camera.rotation.y = wrappedYaw;
-  camera.rotation.z = 0;
+  camera.rotation.set(pitch, wrappedYaw, roll, 'YXZ');
   camera.updateMatrixWorld();
 }
