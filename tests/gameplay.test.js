@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Player } from '../src/player.js';
+import { Player, AIR_SPIN_MAX, YAW_RATE_SLOW } from '../src/player.js';
 import { generateTrack, createFixedTrack, validateTrack } from '../src/trackgen.js';
 import { createTerrain } from '../src/terrain.js';
 import { calculateDifficulty, classifyDifficulty, calibrateDifficulty, scanCandidates, pickSeedLadder } from '../src/difficulty.js';
@@ -9,15 +9,18 @@ import { RaceSession, RACE_STATES, RESPAWN_PENALTY_MS } from '../src/race.js';
 import { Input } from '../src/input.js';
 
 const DT = 1 / 120;
-function input({ steer = 0, throttle = 0, jump = false, yaw = 0 } = {}) {
+function input({ steer = 0, throttle = 0, jump = false, yaw = 0, holdYaw = 0, roll = 0, pitch = null, airYaw = 0 } = {}) {
   let queuedYaw = yaw;
   let pendingJump = jump;
   return {
     steer: () => steer,
     throttle: () => throttle,
+    airRoll: () => roll,
+    airPitch: () => (pitch === null ? -steer : pitch),
+    airYaw: () => airYaw,
     jump: () => pendingJump,
     consumeJump: () => { const value = pendingJump; pendingJump = false; return value; },
-    consumeYawDelta: () => { const delta = queuedYaw; queuedYaw = 0; return delta; },
+    consumeYawDelta: () => { const delta = queuedYaw; queuedYaw = 0; return delta + holdYaw; },
   };
 }
 function simulate(player, controls, terrain, seconds) {
@@ -66,12 +69,11 @@ test('los controles táctiles mantienen pulsaciones independientes y limpian can
   }
 });
 
-test('fase 1: giro con ratón, inercia y derrape sin roll; el teclado no desvía', () => {
+test('fase 1: inercia y derrape sin roll; el teclado gira en el suelo con resistencia', () => {
   const slow = new Player();
   simulate(slow, input({ throttle: 1 }), null, 2);
   assert.ok(slow.speed > 1);
-  const fast = new Player();
-  fast.speed = 20;
+  const fast = new Player({ speed: 20 });
   fast.velX = 0;
   fast.velZ = -20;
   fast.yaw = -0.6;
@@ -82,11 +84,14 @@ test('fase 1: giro con ratón, inercia y derrape sin roll; el teclado no desvía
   assert.equal(fast.roll, 0);
 
   const mouse = new Player();
-  simulate(mouse, input({ yaw: 0.5 }), null, 0.5);
-  assert.ok(Math.abs(mouse.yaw) > 0.2, 'el ratón debe poder girar');
-  const keyboard = new Player();
+  simulate(mouse, input({ holdYaw: 0.02 }), null, 0.5);
+  assert.ok(Math.abs(mouse.yaw) > 0.2, `el ratón debe poder girar, yaw=${mouse.yaw.toFixed(2)}`);
+  const keyboard = new Player({ speed: 10 });
+  keyboard.velX = 0;
+  keyboard.velZ = -10;
   simulate(keyboard, input({ steer: 1 }), null, 1);
-  assert.equal(keyboard.yaw, 0, 'A/D y flechas no deben alterar el rumbo en el suelo');
+  assert.ok(keyboard.yaw < -0.4, `D debe girar en el suelo, yaw=${keyboard.yaw.toFixed(2)}`);
+  assert.equal(keyboard.roll, 0);
 });
 
 test('fase 2: la distancia sampleada coincide con la distancia del mundo en pistas generadas', () => {
@@ -181,24 +186,35 @@ test('física: sin tope duro la bici pasa de 24 m/s', () => {
   assert.ok(player.speed > 24, `debería superar 24 m/s sin recorte, velocidad=${player.speed}`);
 });
 
-test('física: el giro tiene resistencia y a más velocidad cuesta más meter la bici', () => {
+test('física: el giro acelera, tiene tope de régimen y pierde autoridad con la velocidad', () => {
   const slow = new Player({ speed: 5 });
   const fast = new Player({ speed: 30 });
   slow.velX = 0; slow.velZ = -5;
   fast.velX = 0; fast.velZ = -30;
-  simulate(slow, input({ yaw: 1 }), null, 0.25);
-  simulate(fast, input({ yaw: 1 }), null, 0.25);
+  simulate(slow, input({ steer: 1 }), null, 0.6);
+  simulate(fast, input({ steer: 1 }), null, 0.6);
   const slowTurn = Math.abs(slow.yaw);
   const fastTurn = Math.abs(fast.yaw);
-  assert.ok(slowTurn > 0.15, `el ratón debe girar la bici, giro=${slowTurn.toFixed(2)}`);
+  assert.ok(slowTurn > 0.3, `D debe girar la bici, giro=${slowTurn.toFixed(2)}`);
   assert.ok(slowTurn > fastTurn * 1.3, `giro lento=${slowTurn.toFixed(2)} rápido=${fastTurn.toFixed(2)}`);
 
-  const instant = new Player();
-  simulate(instant, input({ yaw: 40 }), null, 1 / 120);
-  assert.ok(Math.abs(instant.yaw) < 0.1, `un tirón del ratón no puede girar de golpe, yaw=${instant.yaw.toFixed(2)}`);
+  const instant = new Player({ speed: 10 });
+  instant.velX = 0; instant.velZ = -10;
+  simulate(instant, input({ steer: 1 }), null, DT);
+  assert.ok(Math.abs(instant.yaw) < 0.02, `un frame no puede girar de golpe, yaw=${instant.yaw.toFixed(3)}`);
+
+  const spinner = new Player({ speed: 0.5 });
+  spinner.velX = 0; spinner.velZ = -0.5;
+  let peak = 0;
+  for (let i = 0; i < 240; i++) {
+    spinner.savePrev();
+    spinner.update(DT, input({ steer: 1 }), null);
+    peak = Math.max(peak, Math.abs(spinner.yawRate));
+  }
+  assert.ok(peak <= YAW_RATE_SLOW + 1e-6, `tope de régimen ${peak.toFixed(2)} > ${YAW_RATE_SLOW}`);
 });
 
-test('física: se salta con Espacio/Q/E y en el aire A/D rota la bici', () => {
+test('física: se salta con Espacio y en el aire Q/E rota con aceleración y tope', () => {
   const track = createFixedTrack();
   const terrain = createTerrain(track);
   const start = track.sampleAt(30);
@@ -206,24 +222,85 @@ test('física: se salta con Espacio/Q/E y en el aire A/D rota la bici', () => {
   player.velX = -Math.sin(start.yaw) * 12;
   player.velZ = -Math.cos(start.yaw) * 12;
   let sawAir = false;
-  let maxAirRoll = 0;
-  for (let i = 0; i < 300; i++) {
+  let maxRoll = 0;
+  let peakRate = 0;
+  let firstAirStep = 0;
+  let wasAir = false;
+  for (let i = 0; i < 400; i++) {
     player.savePrev();
-    player.update(DT, i === 0 ? input({ jump: true, throttle: 1, steer: 1 }) : input({ throttle: 1, steer: 1 }), terrain);
+    const before = player.airRoll;
+    player.update(DT, i === 0 ? input({ jump: true, throttle: 1, roll: 1 }) : input({ throttle: 1, roll: 1 }), terrain);
     if (player.airborne) {
       sawAir = true;
-      maxAirRoll = Math.max(maxAirRoll, Math.abs(player.airRoll));
+      if (!wasAir) firstAirStep = Math.abs(player.airRoll - before);
+      wasAir = true;
+      peakRate = Math.max(peakRate, Math.abs(player.airRate.roll));
+      maxRoll = Math.max(maxRoll, Math.abs(player.airRoll));
     }
     if (sawAir && player.grounded) break;
   }
-  assert.ok(sawAir, 'el salto manual debe despegar');
-  assert.ok(maxAirRoll > 0.3, `la bici debe rotar en el aire (roll=${maxAirRoll.toFixed(2)})`);
+  assert.ok(sawAir, 'el salto con Espacio debe despegar');
+  assert.ok(firstAirStep < 0.01, `la rotación arranca acelerando, no de golpe (${firstAirStep.toFixed(4)})`);
+  assert.ok(maxRoll > 0.25, `la bici debe rotar en el aire (roll=${maxRoll.toFixed(2)})`);
+  assert.ok(peakRate <= AIR_SPIN_MAX + 1e-6, `tope de régimen de giro (${peakRate.toFixed(2)} > ${AIR_SPIN_MAX})`);
   assert.equal(player.roll, 0, 'la cámara nunca se inclina');
-  for (let i = 0; i < 180 && Math.abs(player.airRoll) > 0.05; i++) {
+
+  player.velX = 0;
+  player.velZ = 0;
+  player.speed = 0;
+  for (let i = 0; i < 240 && Math.abs(player.airRoll) > 0.05; i++) {
     player.savePrev();
     player.update(DT, input({}), terrain);
   }
   assert.ok(Math.abs(player.airRoll) < 0.05, 'al aterrizar la bici vuelve a la vertical');
+});
+
+test('física: en el aire A/D es pitch, W/S es yaw y no se pedalea ni se frena', () => {
+  const track = createFixedTrack();
+  const terrain = createTerrain(track);
+  const start = track.sampleAt(40);
+  const rider = new Player({ x: start.x, y: start.y + 30, z: start.z, yaw: start.yaw, speed: 14 });
+  rider.velX = -Math.sin(start.yaw) * 14;
+  rider.velZ = -Math.cos(start.yaw) * 14;
+  rider.grounded = false;
+  const yaw0 = rider.yaw;
+  const speed0 = rider.speed;
+  for (let i = 0; i < 40; i++) {
+    rider.savePrev();
+    rider.update(DT, input({ throttle: 1, steer: 1, airYaw: 1 }), terrain);
+  }
+  assert.ok(rider.airPitch < -0.1, `D baja el morro (pitch=${rider.airPitch.toFixed(2)})`);
+  assert.ok(rider.airYaw > 0.1, `W gira en yaw (yaw visual=${rider.airYaw.toFixed(2)})`);
+  assert.ok(Math.abs(rider.airRoll) < 1e-9, 'sin Q/E no hay roll');
+  assert.equal(rider.yaw, yaw0, 'el rumbo no cambia en el aire');
+  assert.ok(rider.speed <= speed0, 'en el aire no se acelera ni se frena');
+});
+
+test('física: rodar rápido por una pista generada no hace rebotar la bici', () => {
+  let chosen = null;
+  for (let n = 0; n < 12 && !chosen; n++) {
+    const route = generateTrack(`v1:${n}`);
+    const segment = route.segments.find((part) => part.type === 'straight' && part.endS - part.startS > 50 && !route.jumps.some((jump) => jump.takeoffS > part.startS - 15 && jump.takeoffS < part.endS));
+    if (segment) chosen = { route, segment };
+  }
+  assert.ok(chosen, 'debe existir una recta larga sin rampa');
+  const terrain = createTerrain(chosen.route);
+  const start = chosen.route.sampleAt(chosen.segment.startS + 5);
+  const player = new Player({ x: start.x, y: start.y, z: start.z, yaw: start.yaw, speed: 22 });
+  player.velX = -Math.sin(start.yaw) * 22;
+  player.velZ = -Math.cos(start.yaw) * 22;
+  let flips = 0;
+  let maxStep = 0;
+  let lastY = player.y;
+  for (let i = 0; i < 120; i++) {
+    player.savePrev();
+    player.update(DT, input({}), terrain);
+    if (player.airborne) flips++;
+    maxStep = Math.max(maxStep, Math.abs(player.y - lastY));
+    lastY = player.y;
+  }
+  assert.equal(flips, 0, 'la bici no debe despegar rodando en una recta');
+  assert.ok(maxStep < 0.4, `la altura no debe dar saltos (${maxStep.toFixed(2)} m por frame)`);
 });
 
 test('fase 5: tiers 1–5 aparecen en la pila ordenada y los scores son repetibles', () => {
