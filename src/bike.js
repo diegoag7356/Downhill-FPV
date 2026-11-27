@@ -178,9 +178,10 @@ export function createBikeCockpit() {
   root.traverse((object) => {
     if (object.isMesh) object.frustumCulled = false;
   });
-  // Aleja el conjunto del punto de vista para que no invada la pantalla.
-  root.position.z = -0.14;
-  root.scale.setScalar(0.95);
+  // Aleja el conjunto del punto de vista: se ve el manillar completo, la
+  // potencia, la horquilla y parte del cuadro sin invadir la pantalla.
+  root.position.set(0, -0.08, -0.42);
+  root.scale.setScalar(0.9);
   root.userData.wheel = wheel;
   return root;
 }
