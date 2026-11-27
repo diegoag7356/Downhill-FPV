@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#252522" />
+    <title>Downhill FPV — Semillas</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 16px;
+        --ink: #e9e7df;
+        --muted: #aaa89f;
+        --panel: #252522;
+        --panel-raised: #302f2b;
+        --line: #55534d;
+        --accent: #d4a46b;
+        --space: 8px;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #313330; color: var(--ink); }
+      body { overscroll-behavior: none; }
+      button, input { font: inherit; }
+      button {
+        min-height: 44px;
+        padding: 8px 16px;
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        background: var(--panel-raised);
+        color: var(--ink);
+        text-align: left;
+        cursor: pointer;
+        transition: background 150ms ease-out, border-color 150ms ease-out;
+      }
+      button:hover { background: #3b3933; border-color: #aaa89f; }
+      button:active { background: #48443d; }
+      button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      input {
+        min-height: 44px;
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        background: #191a18;
+        color: var(--ink);
+      }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; outline: none; }
+      [hidden] { display: none !important; }
+      .panel {
+        position: fixed;
+        z-index: 2;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        box-shadow: 0 12px 40px rgb(0 0 0 / 22%);
+      }
+      #menu {
+        top: max(24px, env(safe-area-inset-top));
+        left: max(24px, env(safe-area-inset-left));
+        bottom: max(24px, env(safe-area-inset-bottom));
+        width: min(410px, calc(100vw - 48px));
+        display: flex;
+        flex-direction: column;
+        padding: 24px;
+      }
+      .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+      h1 { margin: 0; max-width: 7ch; font-size: clamp(36px, 5vw, 52px); line-height: .98; letter-spacing: -.06em; font-weight: 750; }
+      .lede { margin: 14px 0 22px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+      .seed-form { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 8px; margin-bottom: 8px; }
+      .seed-form label { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+      .seed-form button { padding: 8px; text-align: center; }
+      .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .actions .primary { grid-column: 1 / -1; border-color: var(--accent); color: #f1d4af; }
+      .list-heading { display: flex; justify-content: space-between; align-items: baseline; margin: 22px 0 8px; }
+      .list-heading h2 { margin: 0; font-size: 16px; font-weight: 650; }
+      .list-heading span { color: var(--muted); font-size: 12px; }
+      #track-list { overflow: auto; min-height: 0; padding-right: 4px; }
+      .track-option { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 0 0 6px; gap: 12px; }
+      .track-option span:first-child { display: flex; flex-direction: column; gap: 2px; }
+      .track-option small { color: var(--muted); font-size: 11px; }
+      .track-option span:last-child { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .footnote { margin: auto 0 0; padding-top: 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+      #hud {
+        position: fixed;
+        z-index: 3;
+        top: max(12px, env(safe-area-inset-top));
+        right: max(12px, env(safe-area-inset-right));
+        padding: 8px 10px;
+        color: #f2f2ee;
+        background: rgb(20 21 19 / 78%);
+        font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre;
+        pointer-events: none;
+        user-select: none;
+      }
+      #race-hud {
+        position: fixed;
+        z-index: 2;
+        left: 50%;
+        top: max(18px, env(safe-area-inset-top));
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        min-width: min(470px, calc(100vw - 32px));
+        padding: 12px 16px;
+        background: rgb(28 29 27 / 88%);
+        border: 1px solid #727068;
+        font-variant-numeric: tabular-nums;
+      }
+      #track-name { max-width: 160px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      #timer { font-size: 25px; font-weight: 700; letter-spacing: -.04em; }
+      #checkpoint { margin-left: auto; color: var(--accent); font-size: 12px; }
+      .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #5c5b54; }
+      #progress-fill { width: 0; height: 100%; background: var(--accent); }
+      #best-time { position: absolute; left: 16px; top: calc(100% + 7px); padding: 4px 7px; color: var(--muted); background: rgb(28 29 27 / 88%); font-size: 11px; }
+      #pause, #finish {
+        inset: 50% auto auto 50%;
+        transform: translate(-50%, -50%);
+        width: min(360px, calc(100vw - 32px));
+        padding: 24px;
+      }
+      #pause h2, #finish h2 { margin: 0 0 12px; font-size: 30px; letter-spacing: -.04em; }
+      #pause p, #finish p { color: var(--muted); line-height: 1.5; }
+      #finish-time { display: block; margin: 12px 0; font-size: 36px; font-variant-numeric: tabular-nums; }
+      .stack { display: grid; gap: 8px; margin-top: 18px; }
+      #hint {
+        position: fixed;
+        z-index: 1;
+        left: 50%;
+        bottom: max(14px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        padding: 7px 11px;
+        color: #f4f2ec;
+        background: rgb(20 21 19 / 72%);
+        font-size: 12px;
+        text-align: center;
+        pointer-events: none;
+      }
+      #touch-controls { display: none; position: fixed; z-index: 2; inset: auto 16px max(16px, env(safe-area-inset-bottom)); justify-content: space-between; pointer-events: none; }
+      .ride-hud { position: fixed; z-index: 1; inset: 0; pointer-events: none; }
+      .bar-end { position: absolute; left: 50%; bottom: -3vh; width: min(34vw, 420px); height: 14vh; border: clamp(8px, 1.2vw, 18px) solid #292a27; border-bottom: 0; border-radius: 50% 50% 0 0; transform: translateX(-50%) perspective(260px) rotateX(-14deg); box-shadow: 0 -4px 0 #a1a099, 0 -8px 18px rgb(0 0 0 / 45%); }
+      .bar-stem { position: absolute; left: 50%; bottom: 5vh; width: clamp(16px, 2vw, 28px); height: 12vh; background: linear-gradient(90deg, #393a37, #a09f98 45%, #383936); transform: translateX(-50%) perspective(100px) rotateX(12deg); }
+      .bar-cap { position: absolute; left: 50%; bottom: 15vh; width: clamp(54px, 7vw, 94px); height: clamp(18px, 2.4vw, 30px); border-radius: 50%; background: radial-gradient(ellipse at 42% 32%, #d8d7cf 0 10%, #6c6c67 28%, #252623 72%); transform: translateX(-50%); }
+      .speed-readout { position: absolute; left: 50%; bottom: 2.5vh; color: #efeee8; text-shadow: 0 1px 4px #141512; font: 600 12px/1 ui-monospace, monospace; letter-spacing: .12em; transform: translateX(-50%); }
+      .tree-line { position: fixed; z-index: 1; inset: 0; pointer-events: none; overflow: hidden; }
+      .tree-line span { position: absolute; bottom: 0; width: 0; height: 0; border-left: 7vw solid transparent; border-right: 7vw solid transparent; border-bottom: 24vh solid #405747; filter: drop-shadow(0 0 10px rgb(0 0 0 / 20%)); transform-origin: bottom; }
+      .tree-line span:nth-child(1) { left: 2%; border-bottom-color: #344b41; transform: scale(.72); }
+      .tree-line span:nth-child(2) { left: 12%; border-bottom-color: #526653; transform: scale(.45); }
+      .tree-line span:nth-child(3) { left: 85%; border-bottom-color: #53644f; transform: scale(.62); }
+      .tree-line span:nth-child(4) { left: 94%; border-bottom-color: #33483e; transform: scale(.85); }
+      .touch-cluster { display: flex; gap: 8px; pointer-events: auto; }
+      .touch-cluster button { width: 56px; height: 56px; padding: 0; text-align: center; font-size: 20px; touch-action: none; user-select: none; }
+      @media (pointer: coarse) { #touch-controls:not([hidden]) { display: flex; } }
+      @media (max-width: 600px) {
+        #menu { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); width: min(390px, calc(100vw - 24px)); padding: 20px; }
+        h1 { font-size: 38px; }
+        .lede { margin: 10px 0 16px; }
+        .list-heading { margin-top: 16px; }
+        #hud { top: auto; bottom: max(80px, calc(env(safe-area-inset-bottom) + 76px)); left: 12px; right: auto; font-size: 10px; }
+        #hint { bottom: max(82px, calc(env(safe-area-inset-bottom) + 80px)); width: max-content; max-width: calc(100vw - 24px); font-size: 11px; }
+        #race-hud { top: max(10px, env(safe-area-inset-top)); gap: 10px; padding: 10px 12px; }
+      }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+    </style>
+  </head>
+  <body>
+    <div id="app" aria-label="Escena 3D de descenso en bicicleta"></div>
+    <div class="tree-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <div class="ride-hud" aria-hidden="true"><div class="bar-end"></div><div class="bar-stem"></div><div class="bar-cap"></div><span id="speed-readout" class="speed-readout">0 KM/H</span></div>
+    <section id="menu" class="panel" aria-labelledby="game-title">
+      <p class="eyebrow">Descenso FPV · pista generada</p>
+      <h1 id="game-title">Baja por tu línea.</h1>
+      <p class="lede">Cada semilla crea una ruta distinta. Controla el rumbo, frena antes de las horquillas y encuentra tu propio récord.</p>
+      <div class="seed-form">
+        <label for="seed-input">Semilla de pista</label>
+        <input id="seed-input" type="text" value="v1:0" autocomplete="off" spellcheck="false" aria-describedby="seed-help" />
+        <button id="random-seed" type="button" aria-label="Generar una semilla aleatoria">↻</button>
+      </div>
+      <div id="seed-help" class="actions">
+        <button id="start-seed" class="primary" type="button">Bajar esta pista</button>
+        <button id="start-fixed" type="button">Circuito de práctica</button>
+        <button id="copy-seed" type="button">Copiar enlace</button>
+      </div>
+      <div class="list-heading"><h2>Escalera de pistas</h2><span>fácil → extrema</span></div>
+      <div id="track-list" role="list" aria-label="Pistas ordenadas por dificultad"></div>
+      <p class="footnote">W pedalear · S frenar · A/D girar · R reiniciar · Esc pausar · F malla · L línea central · H datos</p>
+    </section>
+    <section id="race-hud" aria-label="Estado de carrera" hidden>
+      <span id="track-name">Pista</span>
+      <strong id="timer">0:00.00</strong>
+      <span id="checkpoint">Salida</span>
+      <div class="progress" aria-hidden="true"><div id="progress-fill"></div></div>
+      <span id="best-time">Mejor —</span>
+    </section>
+    <pre id="hud" aria-live="off"></pre>
+    <section id="pause" class="panel" aria-labelledby="pause-title" hidden>
+      <p class="eyebrow">Carrera detenida</p>
+      <h2 id="pause-title">Pausa</h2>
+      <p>El cronómetro queda congelado hasta que vuelvas a salir.</p>
+      <div class="stack">
+        <button id="resume" type="button">Continuar</button>
+        <button id="pause-restart" type="button">Reiniciar pista</button>
+        <button id="pause-menu" type="button">Volver al selector</button>
+      </div>
+    </section>
+    <section id="finish" class="panel" aria-labelledby="finish-title" hidden>
+      <p class="eyebrow">Fin de la bajada</p>
+      <h2 id="finish-title">Meta</h2>
+      <p id="result-message">Vuelta completada</p>
+      <strong id="finish-time">0:00.00</strong>
+      <p>Mejor tiempo personal: <span id="finish-best">—</span></p>
+      <div class="stack">
+        <button id="again" type="button">Repetir pista</button>
+        <button id="finish-menu" type="button">Volver al selector</button>
+      </div>
+    </section>
+    <div id="touch-controls" aria-label="Controles táctiles" hidden>
+      <div class="touch-cluster">
+        <button type="button" data-key="KeyA" aria-label="Girar a la izquierda">←</button>
+        <button type="button" data-key="KeyD" aria-label="Girar a la derecha">→</button>
+      </div>
+      <div class="touch-cluster">
+        <button type="button" data-key="KeyS" aria-label="Frenar">−</button>
+        <button type="button" data-key="KeyW" aria-label="Pedalear">+</button>
+      </div>
+    </div>
+    <div id="hint">W pedalear · S frenar · A/D girar · clic en la pista para capturar el ratón</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
