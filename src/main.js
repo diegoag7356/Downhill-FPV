@@ -421,6 +421,7 @@ window.__game = {
   THREE, renderer, scene, camera, player, input, debug, cockpit, cockpitPivot,
   get seed() { return seed; },
   get track() { return track; },
+  get terrain() { return terrain; },
   get race() { return race; },
   get mode() { return gameMode; },
   get frames() { return frameCount; },
