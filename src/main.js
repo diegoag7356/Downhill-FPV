@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Input } from './input.js';
 import { createBikeCockpit } from './bike.js';
-import { Player, MAX_SPEED } from './player.js';
+import { Player, SPEED_REFERENCE } from './player.js';
 import { createCamera, updateCamera, BASE_FOV } from './camera.js';
 import { Debug } from './debug.js';
 import { hashSeed, mulberry32, seedFromUrl, randomSeed, normalizeSeed } from './rng.js';
@@ -12,6 +12,7 @@ import { calculateDifficulty, classifyDifficulty, tierLabel } from './difficulty
 import seedLadder from './seed-ladder.json';
 import { loadRecords } from './records.js';
 import { RaceSession, RACE_STATES } from './race.js';
+import { createContactShadow, loadBikeModel } from './models.js';
 
 const FIXED_DT = 1 / 120;
 const MAX_STEPS = 16;
@@ -28,11 +29,23 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x777777);
 const camera = createCamera(window.innerWidth / window.innerHeight);
 const cockpit = createBikeCockpit();
+cockpit.visible = false;
 camera.add(cockpit);
+// La cámara debe formar parte del grafo para que sus hijos (el cockpit) se
+// rendericen.
+scene.add(camera);
 const player = new Player();
 const input = new Input(renderer.domElement);
 const debug = new Debug(document.getElementById('hud'));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.7));
+const hemisphere = new THREE.HemisphereLight(0xdfeaf2, 0x3c2f24, 1.05);
+const sun = new THREE.DirectionalLight(0xfff1da, 1.1);
+sun.position.set(120, 180, 60);
+scene.add(hemisphere, sun);
+const showcase = new THREE.Group();
+showcase.name = 'showcase';
+scene.add(showcase);
+let showcaseBike = null;
+let showcaseShadow = null;
 
 const ui = {
   menu: document.getElementById('menu'),
@@ -94,7 +107,9 @@ function makeTrack(id) {
   scene.add(trackVisual.root);
   const palette = trackVisual.palette;
   scene.background.setHex(palette.sky);
-  scene.fog = new THREE.Fog(palette.fog, 90, 920);
+  sun.color.setHex(palette.sun ?? 0xfff1da);
+  scene.fog = new THREE.Fog(palette.fog, 70, 780);
+  placeShowcase();
   race = new RaceSession(track, player, { storage: safeStorage() });
   seed = track.id;
   debug.setSeed(seed);
@@ -106,6 +121,33 @@ function makeTrack(id) {
 
 function safeStorage() {
   try { return window.localStorage; } catch { return null; }
+}
+
+// Coloca el modelo de bici generado con Hunyuan3D en la salida del menú.
+function placeShowcase() {
+  if (!track) return;
+  const start = track.sampleAt(8);
+  if (showcaseBike) {
+    showcaseBike.position.set(start.x, start.y, start.z);
+    showcaseBike.rotation.y = start.yaw + Math.PI * 0.25;
+  }
+  if (showcaseShadow) {
+    showcaseShadow.position.set(start.x, start.y + 0.03, start.z);
+    showcaseShadow.rotation.set(-Math.PI / 2, 0, -start.yaw);
+  }
+}
+
+async function loadShowcase() {
+  try {
+    const bike = await loadBikeModel();
+    if (!bike) return;
+    showcaseBike = bike;
+    showcaseShadow = createContactShadow();
+    showcase.add(showcaseBike, showcaseShadow);
+    placeShowcase();
+  } catch (error) {
+    console.warn('No se pudo cargar bicicleta.glb', error);
+  }
 }
 
 function startRace(nextSeed = seed) {
@@ -120,6 +162,9 @@ function startRace(nextSeed = seed) {
     ui.finish.hidden = true;
     ui.raceHud.hidden = false;
     ui.touchControls.hidden = false;
+    if (showcaseBike) showcaseBike.visible = false;
+    if (showcaseShadow) showcaseShadow.visible = false;
+    cockpit.visible = true;
     renderer.domElement.focus();
   } catch (error) {
     showMessage(`No se pudo generar ${nextSeed}: ${error.message}`);
@@ -135,6 +180,9 @@ function openMenu() {
   ui.finish.hidden = true;
   ui.touchControls.hidden = true;
   document.exitPointerLock?.();
+  if (showcaseBike) showcaseBike.visible = true;
+  if (showcaseShadow) showcaseShadow.visible = true;
+  cockpit.visible = false;
   if (track) player.speed = 0;
 }
 
@@ -233,11 +281,12 @@ function tick(dt) {
   if (steps === MAX_STEPS) accumulator = 0;
   const alpha = Math.min(accumulator / FIXED_DT, 1);
   updateCamera(camera, { position: player.eyePosition(alpha), yaw: player.renderYaw(alpha), pitch: player.renderPitch(alpha) });
-  const targetFov = BASE_FOV + Math.min(player.speed / MAX_SPEED, 1) * 8;
+  const targetFov = BASE_FOV + Math.min(player.speed / SPEED_REFERENCE, 1) * 10;
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
   renderer.render(scene, camera);
   ui.speed.textContent = `${Math.round(player.speed * 3.6)} KM/H`;
+  if (showcaseBike && gameMode === 'menu') showcaseBike.rotation.y += dt * 0.55;
   debug.update(dt, renderer, player, { mode: gameMode, track, race });
 }
 
@@ -324,6 +373,7 @@ ui.finish.addEventListener('click', (event) => {
 
 loadSeedList();
 makeTrack(seed);
+loadShowcase();
 createCenterline();
 ui.menu.hidden = false;
 ui.raceHud.hidden = true;
