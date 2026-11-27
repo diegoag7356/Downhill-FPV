@@ -10,7 +10,8 @@ const CAPTURE_KEYS = new Set([
   'KeyE',
 ]);
 
-export const JUMP_KEYS = ['Space', 'KeyQ', 'KeyE'];
+// Espacio es el único salto: Q y E giran la bici en el aire.
+export const JUMP_KEYS = ['Space'];
 
 export class Input {
   constructor(canvas, { onKey } = {}) {
@@ -89,12 +90,12 @@ export class Input {
       button.addEventListener('pointerdown', (event) => {
         event.preventDefault();
         this._touchKeys.add(key);
-        if (JUMP_KEYS.includes(key)) this.jumpPressed = true;
+        if (key === 'Space') this.jumpPressed = true;
         button.setPointerCapture?.(event.pointerId);
       });
       button.addEventListener('pointerup', release);
       button.addEventListener('pointercancel', release);
-      button.addEventListener('lostpointercapture', (event) => this._touchKeys.delete(key));
+      button.addEventListener('lostpointercapture', () => this._touchKeys.delete(key));
       button.addEventListener('contextmenu', (event) => event.preventDefault());
     }
   }
@@ -103,7 +104,7 @@ export class Input {
     return this.keys.has(code) || this._touchKeys.has(code);
   }
 
-  /** -1 izquierda ... +1 derecha (A/D y flechas): solo rotan la bici en el aire. */
+  /** -1 izquierda ... +1 derecha (A/D y flechas): dirección en suelo, pitch en aire. */
   steer() {
     let s = 0;
     if (this.down('KeyA') || this.down('ArrowLeft')) s -= 1;
@@ -111,7 +112,7 @@ export class Input {
     return s;
   }
 
-  /** -1 freno ... +1 pedal (W/S y flechas verticales). */
+  /** -1 freno ... +1 pedal (W/S y flechas verticales): solo con las ruedas en el suelo. */
   throttle() {
     let t = 0;
     if (this.down('KeyW') || this.down('ArrowUp')) t += 1;
@@ -119,7 +120,28 @@ export class Input {
     return t;
   }
 
-  /** ¿Se pidió un salto desde la última llamada? (Espacio, Q o E). */
+  /** Roll en el aire: -1 con Q, +1 con E. */
+  airRoll() {
+    let r = 0;
+    if (this.down('KeyQ')) r -= 1;
+    if (this.down('KeyE')) r += 1;
+    return r;
+  }
+
+  /** Pitch en el aire: +1 con A/izquierda (morro arriba), -1 con D/derecha. */
+  airPitch() {
+    return -this.steer();
+  }
+
+  /** Yaw en el aire: +1 con W/arriba (izquierda), -1 con S/abajo (derecha). */
+  airYaw() {
+    let y = 0;
+    if (this.down('KeyW') || this.down('ArrowUp')) y += 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) y -= 1;
+    return y;
+  }
+
+  /** ¿Se pidió un salto desde la última llamada? (Espacio). */
   consumeJump() {
     const pressed = this.jumpPressed;
     this.jumpPressed = false;
