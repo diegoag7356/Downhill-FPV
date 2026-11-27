@@ -16,7 +16,7 @@ function input({ steer = 0, throttle = 0, jump = false, yaw = 0, holdYaw = 0, ro
     steer: () => steer,
     throttle: () => throttle,
     airRoll: () => roll,
-    airPitch: () => (pitch === null ? -steer : pitch),
+    airPitch: () => (pitch === null ? 0 : pitch),
     airYaw: () => airYaw,
     jump: () => pendingJump,
     consumeJump: () => { const value = pendingJump; pendingJump = false; return value; },
@@ -257,7 +257,7 @@ test('física: se salta con Espacio y en el aire Q/E rota con aceleración y top
   assert.ok(Math.abs(player.airRoll) < 0.05, 'al aterrizar la bici vuelve a la vertical');
 });
 
-test('física: en el aire A/D es pitch, W/S es yaw y no se pedalea ni se frena', () => {
+test('física: en el aire W/S es pitch, A/D es yaw y no se pedalea ni se frena', () => {
   const track = createFixedTrack();
   const terrain = createTerrain(track);
   const start = track.sampleAt(40);
@@ -269,10 +269,10 @@ test('física: en el aire A/D es pitch, W/S es yaw y no se pedalea ni se frena',
   const speed0 = rider.speed;
   for (let i = 0; i < 40; i++) {
     rider.savePrev();
-    rider.update(DT, input({ throttle: 1, steer: 1, airYaw: 1 }), terrain);
+    rider.update(DT, input({ throttle: 1, steer: 1, pitch: -1, airYaw: 1 }), terrain);
   }
-  assert.ok(rider.airPitch < -0.1, `D baja el morro (pitch=${rider.airPitch.toFixed(2)})`);
-  assert.ok(rider.airYaw > 0.1, `W gira en yaw (yaw visual=${rider.airYaw.toFixed(2)})`);
+  assert.ok(rider.airPitch < -0.1, `S baja el morro (pitch=${rider.airPitch.toFixed(2)})`);
+  assert.ok(rider.airYaw > 0.1, `A gira en yaw (yaw visual=${rider.airYaw.toFixed(2)})`);
   assert.ok(Math.abs(rider.airRoll) < 1e-9, 'sin Q/E no hay roll');
   assert.equal(rider.yaw, yaw0, 'el rumbo no cambia en el aire');
   assert.ok(rider.speed <= speed0, 'en el aire no se acelera ni se frena');
