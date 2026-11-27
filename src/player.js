@@ -68,6 +68,9 @@ export class Player {
     this.airRate = { roll: 0, pitch: 0, yaw: 0 };
     this.lossOfControl = 0;
     this.impact = 0;
+    // Punto de aterrizaje de un drop en curso: hasta pasarlo no se vuelve a
+    // tocar el suelo de la pared vertical.
+    this.airLock = 0;
     this.prev = { x, y, z, yaw, pitch: 0 };
   }
 
@@ -169,8 +172,14 @@ export class Player {
       const retainedSpeed = Math.max(0, newSpeed - drag * dt);
       vx = -Math.sin(rotatedHeading) * retainedSpeed;
       vz = -Math.cos(rotatedHeading) * retainedSpeed;
-      if (startingSurface?.onTrack && this.grounded) {
-        const grade = -startingSurface.grade;
+      if (this.grounded) {
+        // La calzada tiene poca resistencia; la hierba y el talud frenan.
+        if (startingSurface && !startingSurface.onTrack) {
+          const offTrack = Math.max(0, 1 - 1.9 * dt);
+          vx *= offTrack;
+          vz *= offTrack;
+        }
+        const grade = startingSurface ? -startingSurface.grade : 0;
         const downhillAcceleration = Math.max(-3, Math.min(3, -grade * GRAVITY));
         vx += (-Math.sin(rotatedHeading)) * downhillAcceleration * dt;
         vz += (-Math.cos(rotatedHeading)) * downhillAcceleration * dt;
@@ -189,11 +198,22 @@ export class Player {
     // pendiente lo permitan, y se estanca de forma progresiva.
     this.speed = Math.hypot(vx, vz);
 
-    const nextX = this.x + this.velX * dt;
-    const nextZ = this.z + this.velZ * dt;
-    const nextSurface = terrain?.sample(nextX, nextZ) ?? null;
+    let nextX = this.x + this.velX * dt;
+    let nextZ = this.z + this.velZ * dt;
     const oldY = this.y;
     this.impact = 0;
+    // Troncos y piedras son sólidos: si la rueda entra en su radio, la bici se
+    // queda donde estaba y pierde casi toda la velocidad.
+    const obstacle = terrain?.obstacles?.near(nextX, nextZ, 0.45)[0];
+    if (obstacle) {
+      nextX = this.x;
+      nextZ = this.z;
+      this.velX *= 0.12;
+      this.velZ *= 0.12;
+      this.speed = Math.hypot(this.velX, this.velZ);
+      this.impact = 12;
+    }
+    const nextSurface = terrain?.sample(nextX, nextZ) ?? null;
 
     if (!terrain) {
       this.x = nextX;
@@ -211,12 +231,20 @@ export class Player {
       this.grounded = false;
     }
 
-    if (this.grounded && startingSurface?.onTrack) {
+    if (this.grounded && startingSurface) {
       const jumped = terrain.track.jumps.find((jump) => {
-        const launchS = jump.takeoffS - 3;
+        // En un drop se sale justo en el labio; en un salto, 3 m antes para
+        // que la rampa haga de trampolín.
+        const launchS = jump.type === 'drop' ? jump.takeoffS : jump.takeoffS - 3;
         return startingSurface.s <= launchS && nextSurface?.s >= launchS && this.speed >= 5;
       });
-      if (jumped) {
+      if (jumped?.type === 'drop') {
+        // En un drop el suelo desaparece: la bici sale del labio y cae libre
+        // hasta la zona de aterrizaje.
+        this.grounded = false;
+        this.vy = Math.max(0, this.vy);
+        this.airLock = jumped.landingS;
+      } else if (jumped) {
         const landing = terrain.track.sampleAt(jumped.landingS);
         const flightDistance = Math.max(8, jumped.landingS - startingSurface.s);
         const flightTime = Math.min(1.75, Math.max(0.55, flightDistance / Math.max(this.speed, 5)));
@@ -226,7 +254,8 @@ export class Player {
       }
       const ballisticY = this.y + this.vy * dt - 0.5 * GRAVITY * dt * dt;
       if (this.grounded && nextSurface) {
-        if (!nextSurface.onTrack) {
+        if (!nextSurface.inside) {
+          // Fuera del corredor: se cae ladera abajo.
           this.grounded = false;
           this.vy = Math.min(this.vy, 0);
         } else if (nextSurface.height < ballisticY - GROUND_SNAP) {
@@ -249,7 +278,14 @@ export class Player {
       this.y += this.vy * dt;
       this.x = nextX;
       this.z = nextZ;
-      if (nextSurface?.onTrack && this.y <= nextSurface.height && this.vy <= 0) {
+      if (this.airLock && nextSurface && nextSurface.s >= this.airLock) this.airLock = 0;
+      const canLand = !this.airLock;
+      if (nextSurface?.inside && canLand && this.y <= nextSurface.height && this.vy > 0) {
+        // Subiendo pero el suelo ya está por encima: se apoya en él en vez de
+        // atravesarlo.
+        this.y = nextSurface.height;
+      }
+      if (nextSurface?.inside && canLand && this.y <= nextSurface.height && this.vy <= 0) {
         this.impact = Math.max(0, -this.vy);
         this.y = nextSurface.height;
         if (this.impact > 7) {
@@ -261,6 +297,7 @@ export class Player {
         }
         this.vy = 0;
         this.grounded = true;
+        this.airLock = 0;
         this.airRate.roll = 0;
         this.airRate.pitch = 0;
         this.airRate.yaw = 0;
@@ -274,7 +311,7 @@ export class Player {
     } else {
       this.x = nextX;
       this.z = nextZ;
-      if (!nextSurface?.onTrack) {
+      if (!nextSurface?.inside) {
         this.grounded = false;
         this.vy = Math.min(this.vy, 0);
       }
@@ -286,7 +323,7 @@ export class Player {
       this.speed = Math.hypot(this.velX, this.velZ);
       this.pitch = Math.atan2(this.vy, Math.max(this.speed, 0.1));
     }
-    this.yaw = wrapAngle(this.yaw);
+    this.yaw = wrapAngle(this.yaw) || 0;
     this.roll = 0;
     this.impact = Math.max(this.impact, Math.abs(oldY - this.y) > 2 ? 9.81 : 0);
     this.driftAngle = wrapAngle(Math.atan2(-this.velX, -this.velZ) - this.yaw);
