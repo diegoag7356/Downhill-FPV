@@ -235,11 +235,22 @@ function showMessage(message) {
 
 function loadSeedList() {
   const records = loadRecords(safeStorage());
-  const sorted = seedLadder.tracks.map((item) => {
-    const route = generateTrack(item.id);
-    const difficulty = calculateDifficulty(route);
-    return { id: item.id, difficulty, tier: item.tier, record: records[`record:${item.id}`] ?? null };
-  });
+  // Si una semilla de la escalera deja de ser válida con el generador actual,
+  // se cae de la lista en vez de romper el menú.
+  const sorted = [];
+  for (const item of seedLadder.tracks) {
+    try {
+      const route = generateTrack(item.id);
+      sorted.push({
+        id: item.id,
+        difficulty: calculateDifficulty(route),
+        tier: item.tier,
+        record: records[`record:${item.id}`] ?? null,
+      });
+    } catch {
+      /* semilla retirada */
+    }
+  }
   ui.trackList.replaceChildren();
   for (const item of sorted) {
     const button = document.createElement('button');
