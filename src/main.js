@@ -20,12 +20,6 @@ const MAX_DPR = 1.5;
 // La vista apunta algo por debajo del horizonte para que se vea la bici sin
 // perder la pista.
 const CAMERA_TILT = -0.09;
-// La cámara va montada en la bici: sigue su rumbo, su inclinación y la rotación
-// del aire. Se aplica casi entera para que la vista gire con la bici.
-const AIR_ROLL_FOLLOW = 0.8;
-const AIR_PITCH_FOLLOW = 0.55;
-const AIR_YAW_FOLLOW = 0.7;
-const LEAN_FOLLOW = 0.35;
 
 const container = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -39,16 +33,9 @@ scene.background = new THREE.Color(0x777777);
 const camera = createCamera(window.innerWidth / window.innerHeight);
 const cockpit = createBikeCockpit();
 cockpit.visible = false;
-// El pivote está en el centro de la bici, no en el ojo: así el roll y el pitch
-// la giran sobre sí misma en vez de hacerla orbitar la cámara.
-const cockpitPivot = new THREE.Group();
-cockpitPivot.name = 'fpv-bike-pivot';
-cockpitPivot.position.set(0, -0.72, -0.5);
-camera.add(cockpitPivot);
-cockpitPivot.add(cockpit);
-cockpit.position.sub(cockpitPivot.position);
-// La cámara debe formar parte del grafo para que sus hijos (la bici) se
-// rendericen.
+// La bici va soldada a la cámara: no se mueve nada en pantalla, es el mundo el
+// que gira con el jugador.
+camera.add(cockpit);
 scene.add(camera);
 const player = new Player();
 const input = new Input(renderer.domElement);
@@ -297,18 +284,18 @@ function tick(dt) {
   }
   if (steps === MAX_STEPS) accumulator = 0;
   const alpha = Math.min(accumulator / FIXED_DT, 1);
+  // Cámara rígida: sin amortiguación ni retardo, con los ángulos exactos del
+  // frame que se está dibujando. La bici, hija de la cámara, queda quieta en
+  // pantalla y es el mundo el que gira.
   updateCamera(camera, {
     position: player.eyePosition(alpha),
-    yaw: player.renderYaw(alpha) + player.airYaw * AIR_YAW_FOLLOW,
-    pitch: player.renderPitch(alpha) + CAMERA_TILT + player.airPitch * AIR_PITCH_FOLLOW,
-    roll: player.airRoll * AIR_ROLL_FOLLOW + player.lean * LEAN_FOLLOW,
+    yaw: player.yaw + player.airYaw,
+    pitch: player.pitch + CAMERA_TILT + player.airPitch,
+    roll: player.lean + player.airRoll,
   });
   const targetFov = BASE_FOV + Math.min(player.speed / SPEED_REFERENCE, 1) * 10;
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
-  // Inclinación por el giro en el suelo y rotación libre en el aire (roll Q/E,
-  // pitch W/S, yaw A/D), todo alrededor del centro de la bici.
-  cockpitPivot.rotation.set(player.airPitch, player.airYaw, player.lean + player.airRoll, 'YXZ');
   const wheel = cockpit.userData.wheel;
   if (wheel) wheel.rotation.z -= player.speed * dt * 2.6;
   renderer.render(scene, camera);
@@ -418,7 +405,7 @@ window.addEventListener('resize', () => {
 });
 
 window.__game = {
-  THREE, renderer, scene, camera, player, input, debug, cockpit, cockpitPivot,
+  THREE, renderer, scene, camera, player, input, debug, cockpit,
   get seed() { return seed; },
   get track() { return track; },
   get terrain() { return terrain; },
