@@ -4,6 +4,8 @@ import { Player } from '../src/player.js';
 import { wrapAngle } from '../src/angles.js';
 import { createCamera, updateCamera } from '../src/camera.js';
 import { hashSeed, mulberry32 } from '../src/rng.js';
+import { createFixedTrack } from '../src/trackgen.js';
+import { createTerrain } from '../src/terrain.js';
 
 const DT = 1 / 120;
 
@@ -21,6 +23,14 @@ function fakeInput({ steer = 0, throttle = 0, yawDelta = 0 } = {}) {
       steer = s;
     },
   };
+}
+
+function run(player, input, seconds) {
+  const steps = Math.round(seconds / DT);
+  for (let i = 0; i < steps; i++) {
+    player.savePrev();
+    player.update(DT, input);
+  }
 }
 
 test('la cámara gira pero nunca se inclina (roll = 0)', () => {
@@ -52,23 +62,44 @@ test('el jugador se mueve en espacio de mundo según su rumbo', () => {
   assert.ok(Math.abs(other.z) < 1e-9, 'yaw +90° no debe generar avance lateral');
 });
 
-test('A gira a la izquierda y D a la derecha sobre el plano', () => {
+test('A/D y las flechas ya no giran en el suelo: solo rotan la bici en el aire', () => {
   const left = new Player();
   run(left, fakeInput({ steer: -1 }), 0.5);
-  assert.ok(left.yaw > 0.5, `A debe aumentar yaw, yaw=${left.yaw}`);
-
   const right = new Player();
   run(right, fakeInput({ steer: 1 }), 0.5);
-  assert.ok(right.yaw < -0.5, `D debe reducir yaw, yaw=${right.yaw}`);
-  assert.equal(right.x, 0, 'girar quieto no desplaza al jugador');
+  assert.equal(left.yaw, 0, 'el teclado no desvía la bici');
+  assert.equal(right.yaw, 0);
+  assert.equal(right.x, 0, 'no se desplaza al pulsar A/D');
   assert.equal(right.z, 0);
+
+  const track = createFixedTrack();
+  const terrain = createTerrain(track);
+  const start = track.sampleAt(20);
+  const airborne = (steer) => {
+    const player = new Player({ x: start.x, y: start.y + 14, z: start.z, yaw: start.yaw, speed: 8 });
+    player.velX = -Math.sin(start.yaw) * 8;
+    player.velZ = -Math.cos(start.yaw) * 8;
+    player.grounded = false;
+    for (let i = 0; i < 24; i++) {
+      player.savePrev();
+      player.update(DT, fakeInput({ steer }), terrain);
+    }
+    return player;
+  };
+  assert.ok(airborne(1).airRoll > 0.2, 'en el aire D rota la bici');
+  assert.ok(airborne(-1).airRoll < -0.2, 'en el aire A rota al otro lado');
+  assert.equal(airborne(1).roll, 0, 'la cámara nunca se inclina');
 });
 
-test('el ratón aporta rumbo, no inclinación', () => {
+test('el ratón aporta rumbo con resistencia, no inclinación', () => {
   const player = new Player();
   run(player, fakeInput({ yawDelta: -0.3 }), DT);
-  assert.ok(Math.abs(player.yaw + 0.3) < 1e-9, 'movementX positivo gira a la derecha');
+  assert.ok(player.yaw < 0, 'movementX positivo gira a la derecha');
+  assert.ok(Math.abs(player.yaw) < 0.1, 'un solo frame no aplica el giro entero');
   assert.equal(player.pitch, 0);
+  run(player, fakeInput({}), 1);
+  assert.ok(Math.abs(player.yaw) > 0.1, 'el rumbo pendiente se aplica poco a poco');
+  assert.ok(Math.abs(player.yaw) <= 0.3 + 1e-9, 'la resistencia nunca gira más de lo pedido');
 });
 
 test('el paso fijo es determinista', () => {

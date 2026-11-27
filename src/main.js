@@ -65,6 +65,7 @@ const ui = {
   copySeed: document.getElementById('copy-seed'),
   touchControls: document.getElementById('touch-controls'),
   speed: document.getElementById('speed-readout'),
+  air: document.getElementById('air-state'),
 };
 
 let seed = normalizeSeed(seedFromUrl()) ?? 'v1:0';
@@ -284,8 +285,14 @@ function tick(dt) {
   const targetFov = BASE_FOV + Math.min(player.speed / SPEED_REFERENCE, 1) * 10;
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
+  // La bici rota en el aire sobre el eje de la vista; la cámara sigue nivelada.
+  cockpit.rotation.z = -player.airRoll;
+  cockpit.rotation.x = player.airRoll * 0.12;
+  const wheel = cockpit.userData.wheel;
+  if (wheel) wheel.rotation.z -= player.speed * dt * 2.6;
   renderer.render(scene, camera);
   ui.speed.textContent = `${Math.round(player.speed * 3.6)} KM/H`;
+  ui.air.textContent = player.airborne ? 'AIRE' : '';
   if (showcaseBike && gameMode === 'menu') showcaseBike.rotation.y += dt * 0.55;
   debug.update(dt, renderer, player, { mode: gameMode, track, race });
 }

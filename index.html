@@ -141,6 +141,7 @@
       }
       #touch-controls { display: none; position: fixed; z-index: 2; inset: auto 16px max(16px, env(safe-area-inset-bottom)); justify-content: space-between; pointer-events: none; }
       .ride-hud { position: fixed; z-index: 1; inset: 0; pointer-events: none; }
+      .air-state { position: absolute; left: 50%; bottom: 5.5vh; color: #f4e3c4; text-shadow: 0 1px 4px #141512; font: 600 11px/1 ui-monospace, monospace; letter-spacing: .28em; transform: translateX(-50%); }
       .speed-readout { position: absolute; left: 50%; bottom: 2.5vh; color: #efeee8; text-shadow: 0 1px 4px #141512; font: 600 12px/1 ui-monospace, monospace; letter-spacing: .12em; transform: translateX(-50%); }
       .tree-line { position: fixed; z-index: 1; inset: 0; pointer-events: none; overflow: hidden; }
       .tree-line span { position: absolute; bottom: 0; width: 0; height: 0; border-left: 7vw solid transparent; border-right: 7vw solid transparent; border-bottom: 24vh solid #405747; filter: drop-shadow(0 0 10px rgb(0 0 0 / 20%)); transform-origin: bottom; }
@@ -166,7 +167,7 @@
   <body>
     <div id="app" aria-label="Escena 3D de descenso en bicicleta"></div>
     <div class="tree-line" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-    <div class="ride-hud" aria-hidden="true"><span id="speed-readout" class="speed-readout">0 KM/H</span></div>
+    <div class="ride-hud" aria-hidden="true"><span id="air-state" class="air-state"></span><span id="speed-readout" class="speed-readout">0 KM/H</span></div>
     <section id="menu" class="panel" aria-labelledby="game-title">
       <p class="eyebrow">Descenso FPV · pista generada</p>
       <h1 id="game-title">Baja por tu línea.</h1>
@@ -183,7 +184,7 @@
       </div>
       <div class="list-heading"><h2>Escalera de pistas</h2><span>fácil → extrema</span></div>
       <div id="track-list" role="list" aria-label="Pistas ordenadas por dificultad"></div>
-      <p class="footnote">W pedalear · S frenar · A/D girar · R reiniciar · Esc pausar · F malla · L línea central · H datos</p>
+      <p class="footnote">W pedalear · S frenar · ratón girar · Espacio/Q/E saltar · A/D rotar en el aire · R reiniciar · Esc pausar</p>
     </section>
     <section id="race-hud" aria-label="Estado de carrera" hidden>
       <span id="track-name">Pista</span>
@@ -216,15 +217,16 @@
     </section>
     <div id="touch-controls" aria-label="Controles táctiles" hidden>
       <div class="touch-cluster">
-        <button type="button" data-key="KeyA" aria-label="Girar a la izquierda">←</button>
-        <button type="button" data-key="KeyD" aria-label="Girar a la derecha">→</button>
+        <button type="button" data-key="KeyA" aria-label="Rotar a la izquierda en el aire">←</button>
+        <button type="button" data-key="KeyD" aria-label="Rotar a la derecha en el aire">→</button>
       </div>
       <div class="touch-cluster">
         <button type="button" data-key="KeyS" aria-label="Frenar">−</button>
         <button type="button" data-key="KeyW" aria-label="Pedalear">+</button>
+        <button type="button" data-key="Space" aria-label="Saltar">↑</button>
       </div>
     </div>
-    <div id="hint">W pedalear · S frenar · A/D girar · clic en la pista para capturar el ratón</div>
+    <div id="hint">Ratón para girar · Espacio/Q/E salto · A/D y flechas rotan en el aire</div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
