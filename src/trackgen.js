@@ -155,7 +155,12 @@ export function candidate(seed, attempt) {
     let length = 70 + random() * 60;
     let turn = 0;
     let type = 'straight';
-    if (choice < 0.5) {
+    if (segments.length === 0) {
+      // Recta de salida: la bajada empieza rodada y da tiempo a colocar la bici
+      // antes de la primera curva.
+      type = 'straight';
+      length = 85 + random() * 25;
+    } else if (choice < 0.5) {
       type = 'open-curve'; turn = (random() < 0.5 ? -1 : 1) * (0.95 + random() * 0.8); length = 70 + random() * 45;
     } else if (choice < 0.8) {
       type = 'hairpin'; turn = (random() < 0.5 ? -1 : 1) * (Math.PI * 0.85 + random() * 0.3); length = 105 + random() * 40;
@@ -252,6 +257,7 @@ function clamp01(value) {
 export function validateTrack(track) {
   if (!track || track.points.length < 3) return { valid: false, reason: 'too few samples' };
   if (track.length < 560 || track.length > 1200) return { valid: false, reason: `length ${track.length.toFixed(1)}m outside range` };
+  if (track.metrics.totalTurn < 5) return { valid: false, reason: `only ${track.metrics.totalTurn.toFixed(1)}rad of turns` };
   const cellSize = TRACK_WIDTH + SHOULDER_WIDTH;
   const occupied = new Map();
   const points = track.points;
