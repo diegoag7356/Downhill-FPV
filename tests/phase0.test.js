@@ -36,18 +36,21 @@ function run(player, input, seconds) {
   }
 }
 
-test('la cámara gira pero nunca se inclina (roll = 0)', () => {
+test('la cámara sigue a la bici: gira, cabecea y se inclina con ella', () => {
   const camera = createCamera(16 / 9);
   const rand = mulberry32(hashSeed('v1:0'));
   for (let i = 0; i < 500; i++) {
     const yaw = (rand() * 2 - 1) * Math.PI * 4;
     const pitch = (rand() * 2 - 1) * 0.9;
-    updateCamera(camera, { position: { x: rand() * 100, y: 1.6, z: -rand() * 100 }, yaw, pitch });
+    const roll = (rand() * 2 - 1) * Math.PI;
+    updateCamera(camera, { position: { x: rand() * 100, y: 1.6, z: -rand() * 100 }, yaw, pitch, roll });
     assert.equal(camera.rotation.order, 'YXZ');
-    assert.equal(camera.rotation.z, 0);
     assert.ok(Math.abs(camera.rotation.y - wrapAngle(yaw)) < 1e-12);
     assert.ok(Math.abs(camera.rotation.x - pitch) < 1e-12);
+    assert.ok(Math.abs(camera.rotation.z - roll) < 1e-12);
   }
+  updateCamera(camera, { position: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0 });
+  assert.equal(camera.rotation.z, 0);
 });
 
 test('el jugador se mueve en espacio de mundo según su rumbo', () => {
@@ -101,7 +104,7 @@ test('A/D y las flechas giran en el suelo, inclinan la bici con tope y en el air
 });
 
 test('el ratón aporta rumbo con resistencia, no inclinación', () => {
-  const player = new Player();
+  const player = new Player({ speed: 6 });
   run(player, fakeInput({ yawDelta: -0.35 }), DT);
   assert.ok(player.yaw < 0, 'movementX positivo gira a la derecha');
   assert.ok(Math.abs(player.yaw) < 0.02, 'un solo frame no aplica el giro entero');
