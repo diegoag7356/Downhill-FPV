@@ -147,11 +147,11 @@ test('las teclas del aire son Q/E roll, W/S pitch y A/D yaw', () => {
     input.keys.clear();
 
     input.keys.add('KeyW');
-    assert.equal(input.airPitch(), 1, 'W sube el morro');
+    assert.equal(input.airPitch(), -1, 'W baja el morro');
     assert.equal(input.airYaw(), 0);
     input.keys.clear();
     input.keys.add('ArrowDown');
-    assert.equal(input.airPitch(), -1, 'la flecha abajo baja el morro');
+    assert.equal(input.airPitch(), 1, 'la flecha abajo sube el morro');
     input.keys.clear();
 
     input.keys.add('KeyA');
