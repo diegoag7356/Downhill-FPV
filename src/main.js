@@ -214,7 +214,7 @@ function togglePause() {
   } else if (race.state === RACE_STATES.PAUSED) {
     race.pause();
     gameMode = 'racing';
-    ui.pause.hidden = false;
+    ui.pause.hidden = true;
     ui.touchControls.hidden = false;
   }
 }
@@ -421,7 +421,6 @@ window.__game = {
   THREE, renderer, scene, camera, player, input, debug, cockpit, cockpitPivot,
   get seed() { return seed; },
   get track() { return track; },
-  get terrain() { return terrain; },
   get race() { return race; },
   get mode() { return gameMode; },
   get frames() { return frameCount; },
