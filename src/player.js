@@ -124,7 +124,7 @@ export class Player {
     }
 
     // --- Rotación libre de la bici en el aire --------------------------------
-    // Q/E roll (eje rojo), A/D pitch (eje azul), W/S yaw (eje verde).
+    // Q/E roll (eje rojo), W/S pitch (eje azul), A/D yaw (eje verde).
     const rollAxis = clamp(input.airRoll?.() ?? 0, -1, 1);
     const pitchAxis = clamp(input.airPitch?.() ?? 0, -1, 1);
     const yawAxis = clamp(input.airYaw?.() ?? 0, -1, 1);
