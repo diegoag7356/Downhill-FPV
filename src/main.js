@@ -17,6 +17,9 @@ import { createContactShadow, loadBikeModel } from './models.js';
 const FIXED_DT = 1 / 120;
 const MAX_STEPS = 16;
 const MAX_DPR = 1.5;
+// La vista apunta algo por debajo del horizonte para que se vea la bici sin
+// perder la pista.
+const CAMERA_TILT = -0.09;
 
 const container = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -281,13 +284,13 @@ function tick(dt) {
   }
   if (steps === MAX_STEPS) accumulator = 0;
   const alpha = Math.min(accumulator / FIXED_DT, 1);
-  updateCamera(camera, { position: player.eyePosition(alpha), yaw: player.renderYaw(alpha), pitch: player.renderPitch(alpha) });
+  updateCamera(camera, { position: player.eyePosition(alpha), yaw: player.renderYaw(alpha), pitch: player.renderPitch(alpha) + CAMERA_TILT });
   const targetFov = BASE_FOV + Math.min(player.speed / SPEED_REFERENCE, 1) * 10;
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
-  // La bici rota en el aire sobre el eje de la vista; la cámara sigue nivelada.
-  cockpit.rotation.z = -player.airRoll;
-  cockpit.rotation.x = player.airRoll * 0.12;
+  // Inclinación por el giro en el suelo y rotación libre en el aire (roll Q/E,
+  // pitch A/D, yaw W/S). La cámara sigue nivelada: solo gira.
+  cockpit.rotation.set(player.airPitch, player.airYaw, player.lean + player.airRoll, 'YXZ');
   const wheel = cockpit.userData.wheel;
   if (wheel) wheel.rotation.z -= player.speed * dt * 2.6;
   renderer.render(scene, camera);
@@ -384,7 +387,7 @@ loadShowcase();
 createCenterline();
 ui.menu.hidden = false;
 ui.raceHud.hidden = true;
-updateCamera(camera, { position: player.eyePosition(0), yaw: player.yaw, pitch: 0 });
+updateCamera(camera, { position: player.eyePosition(0), yaw: player.yaw, pitch: CAMERA_TILT });
 renderer.render(scene, camera);
 debug.setSeed(seed);
 debug.update(0, renderer, player, { mode: gameMode, track, race });
