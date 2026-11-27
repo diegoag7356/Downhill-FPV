@@ -6,6 +6,7 @@ import { createCamera, updateCamera } from '../src/camera.js';
 import { hashSeed, mulberry32 } from '../src/rng.js';
 import { createFixedTrack } from '../src/trackgen.js';
 import { createTerrain } from '../src/terrain.js';
+import { Input } from '../src/input.js';
 
 const DT = 1 / 120;
 
@@ -15,8 +16,8 @@ function fakeInput({ steer = 0, throttle = 0, yawDelta = 0 } = {}) {
     steer: () => steer,
     throttle: () => throttle,
     airRoll: () => 0,
-    airPitch: () => -steer,
-    airYaw: () => 0,
+    airPitch: () => 0,
+    airYaw: () => -steer,
     consumeYawDelta: () => {
       const d = pendingYaw;
       pendingYaw = 0;
@@ -68,7 +69,7 @@ test('el jugador se mueve en espacio de mundo según su rumbo', () => {
   assert.ok(Math.abs(other.z) < 1e-9, 'yaw +90° no debe generar avance lateral');
 });
 
-test('A/D y las flechas giran en el suelo, inclinan la bici con tope y en el aire solo rotan', () => {
+test('A/D y las flechas giran en el suelo, inclinan la bici con tope y en el aire giran en yaw', () => {
   const right = new Player({ speed: 8 });
   right.velX = 0;
   right.velZ = -8;
@@ -85,7 +86,7 @@ test('A/D y las flechas giran en el suelo, inclinan la bici con tope y en el air
   assert.ok(left.yaw > 0.15, 'A gira al otro lado');
   assert.ok(left.lean > 0.05, 'y se inclina al otro lado');
 
-  // En el aire A/D no cambia el rumbo: rota la bici en el eje de pitch.
+  // En el aire A/D no cambia el rumbo: rota la bici en el eje vertical.
   const track = createFixedTrack();
   const terrain = createTerrain(track);
   const start = track.sampleAt(20);
@@ -97,8 +98,9 @@ test('A/D y las flechas giran en el suelo, inclinan la bici con tope y en el air
     airborne.savePrev();
     airborne.update(DT, fakeInput({ steer: 1 }), terrain);
   }
-  assert.equal(airborne.yaw, 0, 'A/D no desvían en el aire');
-  assert.ok(airborne.airPitch < -0.02, `D baja el morro (pitch=${airborne.airPitch.toFixed(2)})`);
+  assert.equal(airborne.yaw, 0, 'A/D no desvían el rumbo en el aire');
+  assert.ok(airborne.airYaw < -0.02, `D gira la bici en yaw (${airborne.airYaw.toFixed(2)})`);
+  assert.ok(Math.abs(airborne.airPitch) < 1e-9, 'A/D no hacen pitch');
   assert.ok(Math.abs(airborne.airRoll) < 1e-9, 'A/D no hacen roll');
   assert.equal(airborne.roll, 0, 'la cámara nunca se inclina');
 });
@@ -128,6 +130,42 @@ test('el ratón aporta rumbo con resistencia, no inclinación', () => {
   run(player, fakeInput({}), 0.5);
   assert.ok(Math.abs(player.yawRate) < 0.01, 'al soltar, el giro se frena');
   assert.ok(Math.abs(player.yaw - turned) < 0.2, 'sin ratón el rumbo no se va solo');
+});
+
+test('las teclas del aire son Q/E roll, W/S pitch y A/D yaw', () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const target = { addEventListener() {}, requestPointerLock() {} };
+  globalThis.window = target;
+  globalThis.document = { pointerLockElement: null };
+  try {
+    const input = new Input(target);
+    input.keys.add('KeyQ');
+    assert.equal(input.airRoll(), -1);
+    input.keys.add('KeyE');
+    assert.equal(input.airRoll(), 0, 'Q y E se cancelan');
+    input.keys.clear();
+
+    input.keys.add('KeyW');
+    assert.equal(input.airPitch(), 1, 'W sube el morro');
+    assert.equal(input.airYaw(), 0);
+    input.keys.clear();
+    input.keys.add('ArrowDown');
+    assert.equal(input.airPitch(), -1, 'la flecha abajo baja el morro');
+    input.keys.clear();
+
+    input.keys.add('KeyA');
+    assert.equal(input.airYaw(), 1, 'A gira a la izquierda');
+    assert.equal(input.airPitch(), 0);
+    input.keys.clear();
+    input.keys.add('ArrowRight');
+    assert.equal(input.airYaw(), -1, 'la flecha derecha gira a la derecha');
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
 });
 
 test('el paso fijo es determinista', () => {
