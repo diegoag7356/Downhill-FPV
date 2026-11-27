@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Player, AIR_SPIN_MAX, YAW_RATE_SLOW } from '../src/player.js';
-import { generateTrack, createFixedTrack, validateTrack } from '../src/trackgen.js';
+import { Player, AIR_SPIN_MAX, YAW_RATE_SLOW, wrapAngle } from '../src/player.js';
+import { generateTrack, createFixedTrack, validateTrack, CORRIDOR_HALF, CORRIDOR_CLEARANCE } from '../src/trackgen.js';
 import { createTerrain } from '../src/terrain.js';
 import { calculateDifficulty, classifyDifficulty, calibrateDifficulty, scanCandidates, pickSeedLadder } from '../src/difficulty.js';
 import { loadRecords, saveRecord, recordKey } from '../src/records.js';
@@ -133,7 +133,7 @@ test('fase 3: 100 saltos de semillas distintas producen vuelo y aterrizaje sin a
     rider.velZ = -Math.cos(rider.yaw) * speed;
     let sawAir = false;
     let landed = false;
-    let maxHeight = rider.y;
+    let maxClearance = -Infinity;
     let minClearance = 0;
     for (let i = 0; i < 900; i++) {
       rider.savePrev();
@@ -141,14 +141,18 @@ test('fase 3: 100 saltos de semillas distintas producen vuelo y aterrizaje sin a
       const surface = terrain.sample(rider.x, rider.z);
       sawAir ||= rider.airborne;
       if (sawAir) minClearance = Math.min(minClearance, rider.y - surface.height);
-      maxHeight = Math.max(maxHeight, rider.y);
+      maxClearance = Math.max(maxClearance, rider.y - surface.height);
       assert.equal(rider.roll, 0);
       assert.ok(Number.isFinite(rider.y));
       if (sawAir && rider.grounded) { landed = true; break; }
     }
     assert.ok(sawAir, `${track.id}: ramp must produce airborne state`);
     assert.ok(landed, `${track.id}: flight must land on track`);
-    assert.ok(maxHeight > launch.y + 0.25, `${track.id}: must gain height`);
+    if (jump.type === 'drop') {
+      assert.ok(track.sampleAt(jump.landingS).y < launch.y - 1.5, `${track.id}: drop must fall (${jump.height.toFixed(1)}m)`);
+    } else {
+      assert.ok(maxClearance > 0.6, `${track.id}: the ramp must lift the bike (${maxClearance.toFixed(2)} m sobre el suelo)`);
+    }
     assert.ok(minClearance >= -0.02, `${track.id}: penetrated terrain by ${minClearance}m`);
   }
 });
@@ -175,7 +179,7 @@ test('fase 4: semilla reproducible y mil pistas válidas con curvas y saltos', (
     const track = generateTrack(`v1:${n}`);
     const result = validateTrack(track);
     assert.equal(result.valid, true, `v1:${n}: ${result.reason}`);
-    assert.ok(track.length >= 560 && track.length <= 1200);
+    assert.ok(track.length >= 700 && track.length <= 1500);
     assert.ok(track.metrics.totalTurn > Math.PI * 1.5, `v1:${n} needs real turns`);
     assert.ok(track.jumps.length >= 1, `v1:${n} has no jump`);
     assert.ok(track.jumps.every((jump) => jump.runup >= 15 && jump.landing >= 15));
@@ -271,11 +275,80 @@ test('física: en el aire W/S es pitch, A/D es yaw y no se pedalea ni se frena',
     rider.savePrev();
     rider.update(DT, input({ throttle: 1, steer: 1, pitch: -1, airYaw: 1 }), terrain);
   }
-  assert.ok(rider.airPitch < -0.1, `S baja el morro (pitch=${rider.airPitch.toFixed(2)})`);
+  assert.ok(rider.airPitch < -0.1, `un pitch negativo baja el morro (pitch=${rider.airPitch.toFixed(2)})`);
   assert.ok(rider.airYaw > 0.1, `A gira en yaw (yaw visual=${rider.airYaw.toFixed(2)})`);
   assert.ok(Math.abs(rider.airRoll) < 1e-9, 'sin Q/E no hay roll');
-  assert.equal(rider.yaw, yaw0, 'el rumbo no cambia en el aire');
+  assert.ok(Math.abs(wrapAngle(rider.yaw - yaw0)) < 1e-9, 'el rumbo no cambia en el aire');
   assert.ok(rider.speed <= speed0, 'en el aire no se acelera ni se frena');
+});
+
+test('trazado: la bajada empieza en la cima, cae fuerte y no se cruza consigo misma', () => {
+  for (let n = 0; n < 40; n++) {
+    const track = generateTrack(`v1:${n}`);
+    assert.ok(track.drop > 120, `${track.id}: solo baja ${track.drop.toFixed(0)} m`);
+    assert.ok(-track.metrics.meanGrade > 0.14, `${track.id}: pendiente media ${(track.metrics.meanGrade * 100).toFixed(1)}%`);
+    assert.ok(Math.abs(track.points[0].y - track.sampleAt(44).y) < 5, `${track.id}: la salida debe ser una cima`);
+    for (let i = 0; i < track.points.length; i += 8) {
+      for (let j = i + 4; j < track.points.length; j += 8) {
+        const a = track.points[i];
+        const b = track.points[j];
+        if (Math.abs(a.s - b.s) < 60) continue;
+        const gap = Math.hypot(a.x - b.x, a.z - b.z);
+        assert.ok(gap >= CORRIDOR_CLEARANCE - 0.01, `${track.id}: dos tramos a ${gap.toFixed(1)} m (s=${a.s.toFixed(0)})`);
+      }
+    }
+  }
+});
+
+test('trazado: las pistas difíciles acumulan saltos grandes y drops', () => {
+  let hard = 0;
+  for (let n = 0; n < 40; n++) {
+    const track = generateTrack(`v1:${n}`);
+    const score = calculateDifficulty(track).score;
+    if (score < 58) continue;
+    hard++;
+    assert.ok(track.jumps.length >= 3, `${track.id}: solo ${track.jumps.length} saltos`);
+    assert.ok(track.jumps.filter((feature) => feature.height >= 2.4).length >= 2, `${track.id}: saltos pequeños (${track.jumps.map((f) => f.height.toFixed(1)).join(',')})`);
+    if ((track.complexity ?? 0) > 0.62) {
+      assert.ok(track.jumps.some((feature) => feature.type === 'drop'), `${track.id}: falta un drop`);
+    }
+  }
+  assert.ok(hard >= 3, 'debe haber pistas difíciles en la muestra');
+});
+
+test('suelo: calzada, arcén y talud son transitables y sólidos', () => {
+  const track = createFixedTrack();
+  const terrain = createTerrain(track);
+  const centre = track.sampleAt(track.length * 0.3);
+  const at = (lateral) => terrain.sample(
+    centre.x + Math.cos(centre.yaw) * lateral,
+    centre.z - Math.sin(centre.yaw) * lateral,
+  );
+  const road = at(0);
+  const shoulder = at(5.5);
+  const bank = at(20);
+  const void_ = at(CORRIDOR_HALF + 3);
+  assert.ok(Math.abs(road.height - centre.y) < 0.1, 'la calzada está a la altura del eje');
+  assert.ok(shoulder.inside && shoulder.height < road.height && shoulder.height > road.height - 1.5, 'el arcén es transitable');
+  assert.ok(bank.inside && bank.height < shoulder.height - 5, 'el talud cae con fuerza');
+  assert.equal(void_.inside, false, 'más allá del corredor no hay suelo');
+});
+
+test('obstáculos: los árboles paran la bici en vez de dejarla pasar', () => {
+  const track = createFixedTrack();
+  const terrain = createTerrain(track);
+  const tree = terrain.obstacles.items.find((item) => item.kind === 'tree');
+  assert.ok(tree, 'la pista tiene árboles');
+  const rider = new Player({ x: tree.x, y: tree.y + 2, z: tree.z + 6, yaw: 0, speed: 12 });
+  rider.velX = 0;
+  rider.velZ = -12;
+  let closest = Infinity;
+  for (let i = 0; i < 240; i++) {
+    rider.savePrev();
+    rider.update(DT, input({ throttle: 1 }), terrain);
+    closest = Math.min(closest, Math.hypot(rider.x - tree.x, rider.z - tree.z));
+  }
+  assert.ok(closest >= tree.radius, `la bici atravesó el árbol (${closest.toFixed(2)} m < ${tree.radius.toFixed(2)} m)`);
 });
 
 test('física: rodar rápido por una pista generada no hace rebotar la bici', () => {
