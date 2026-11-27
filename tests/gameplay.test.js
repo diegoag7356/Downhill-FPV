@@ -158,6 +158,28 @@ test('fase 4: semilla reproducible y mil pistas válidas con curvas y saltos', (
   }
 });
 
+test('física: sin tope duro la bici pasa de 24 m/s y el manillar vuelve solo al centro', () => {
+  const player = new Player();
+  simulate(player, input({ throttle: 1 }), null, 25);
+  assert.ok(player.speed > 24, `debería superar 24 m/s sin recorte, velocidad=${player.speed}`);
+
+  const turning = new Player();
+  simulate(turning, input({ steer: 1 }), null, 1);
+  assert.ok(turning.steerAngle > 0.9, 'el manillar debe cargarse al mantener el giro');
+  simulate(turning, input({ steer: 0 }), null, 1);
+  assert.ok(Math.abs(turning.steerAngle) < 0.05, 'al soltar, la resistencia recentra el manillar');
+});
+
+test('física: a más velocidad el mismo manillar gira menos', () => {
+  const slow = new Player({ speed: 8 });
+  const fast = new Player({ speed: 35 });
+  simulate(slow, input({ steer: 1 }), null, 1);
+  simulate(fast, input({ steer: 1 }), null, 1);
+  const slowTurn = Math.abs(slow.yaw);
+  const fastTurn = Math.abs(fast.yaw);
+  assert.ok(slowTurn > fastTurn * 1.3, `giro lento=${slowTurn.toFixed(2)} rápido=${fastTurn.toFixed(2)}`);
+});
+
 test('fase 5: tiers 1–5 aparecen en la pila ordenada y los scores son repetibles', () => {
   const candidates = scanCandidates({ count: 300, start: 12000 });
   assert.deepEqual([...candidates].sort((a, b) => a.score - b.score), candidates);
