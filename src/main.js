@@ -214,7 +214,7 @@ function togglePause() {
   } else if (race.state === RACE_STATES.PAUSED) {
     race.pause();
     gameMode = 'racing';
-    ui.pause.hidden = true;
+    ui.pause.hidden = false;
     ui.touchControls.hidden = false;
   }
 }
@@ -307,7 +307,7 @@ function tick(dt) {
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 8));
   camera.updateProjectionMatrix();
   // Inclinación por el giro en el suelo y rotación libre en el aire (roll Q/E,
-  // pitch A/D, yaw W/S), todo alrededor del centro de la bici.
+  // pitch W/S, yaw A/D), todo alrededor del centro de la bici.
   cockpitPivot.rotation.set(player.airPitch, player.airYaw, player.lean + player.airRoll, 'YXZ');
   const wheel = cockpit.userData.wheel;
   if (wheel) wheel.rotation.z -= player.speed * dt * 2.6;
