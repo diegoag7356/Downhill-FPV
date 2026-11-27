@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // Vite emite los .glb generados por generar_3d.py como assets con hash, así
-// funcionan tanto en local como en GitHub Pages con base relativa. Si el
-// modelo no existe, el juego arranca sin escaparate en vez de romper el build.
-const bikeModules = import.meta.glob('../assets_3d/bicicleta.glb', { query: '?url', import: 'default', eager: true });
-const bikeUrl = Object.values(bikeModules)[0] ?? null;
+// funcionan tanto en local como en GitHub Pages con base relativa. Se admite
+// el .glb directo o su versión .glb.gz, que se descomprime en el navegador.
+const bikeModules = import.meta.glob(
+  ['../assets_3d/bicicleta.glb', '../assets_3d/bicicleta.glb.gz'],
+  { query: '?url', import: 'default', eager: true },
+);
 
 const loader = new GLTFLoader();
 
@@ -12,6 +14,29 @@ function load(url) {
   return new Promise((resolve, reject) => {
     loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
   });
+}
+
+async function loadCompressed(url) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('DecompressionStream no está disponible en este navegador');
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`No se pudo descargar ${url}`);
+  const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
+  const buffer = await new Response(stream).arrayBuffer();
+  return new Promise((resolve, reject) => {
+    loader.parse(buffer, '', (gltf) => resolve(gltf.scene), reject);
+  });
+}
+
+async function loadBikeScene() {
+  const entries = Object.entries(bikeModules);
+  if (!entries.length) return null;
+  const plain = entries.find(([path]) => path.endsWith('.glb'));
+  const compressed = entries.find(([path]) => path.endsWith('.glb.gz'));
+  if (plain) return load(plain[1]);
+  if (compressed) return loadCompressed(compressed[1]);
+  return null;
 }
 
 /**
@@ -70,7 +95,7 @@ export function createContactShadow(width = 2.7, depth = 1) {
 }
 
 export async function loadBikeModel() {
-  if (!bikeUrl) return null;
-  const scene = await load(bikeUrl);
+  const scene = await loadBikeScene();
+  if (!scene) return null;
   return normalizeModel(scene, 2.1);
 }
