@@ -104,7 +104,7 @@ export class Input {
     return this.keys.has(code) || this._touchKeys.has(code);
   }
 
-  /** -1 izquierda ... +1 derecha (A/D y flechas): dirección en suelo, pitch en aire. */
+  /** -1 izquierda ... +1 derecha (A/D y flechas): dirección en suelo, yaw en aire. */
   steer() {
     let s = 0;
     if (this.down('KeyA') || this.down('ArrowLeft')) s -= 1;
@@ -128,17 +128,18 @@ export class Input {
     return r;
   }
 
-  /** Pitch en el aire: +1 con A/izquierda (morro arriba), -1 con D/derecha. */
+  /** Pitch en el aire: +1 con W/arriba (morro arriba), -1 con S/abajo (morro abajo). */
   airPitch() {
-    return -this.steer();
+    let p = 0;
+    if (this.down('KeyW') || this.down('ArrowUp')) p += 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) p -= 1;
+    return p;
   }
 
-  /** Yaw en el aire: +1 con W/arriba (izquierda), -1 con S/abajo (derecha). */
+  /** Yaw en el aire: +1 con A/izquierda, -1 con D/derecha. */
   airYaw() {
-    let y = 0;
-    if (this.down('KeyW') || this.down('ArrowUp')) y += 1;
-    if (this.down('KeyS') || this.down('ArrowDown')) y -= 1;
-    return y;
+    const s = this.steer();
+    return s === 0 ? 0 : -s;
   }
 
   /** ¿Se pidió un salto desde la última llamada? (Espacio). */
