@@ -2,12 +2,19 @@
 import { wrapAngle } from './angles.js';
 
 const GRAVITY = 9.81;
-const ACCELERATION = 8.5;
+const PEDAL_ACCELERATION = 8.5;
 const BRAKING = 18;
 const AIR_DRAG = 0.012;
 const ROLLING_DRAG = 0.55;
+const AERO_DRAG = 0.0045;
 const EYE_HEIGHT = 1.6;
-export const MAX_SPEED = 24;
+// Velocidad de referencia para HUD y FOV. No es un tope: la resistencia crece
+// con la velocidad y la bici sigue ganando metros por segundo, cada vez menos.
+export const SPEED_REFERENCE = 40;
+const PEDAL_FADE_SPEED = 60;
+const STEER_BUILD_RATE = 7.5;
+const STEER_RETURN_RATE = 4.2;
+const BASE_TURN_RATE = 2.2;
 const CONTROL_LOSS_ANGLE = Math.PI / 4;
 
 export class Player {
@@ -24,6 +31,7 @@ export class Player {
     this.pitch = 0;
     this.roll = 0;
     this.driftAngle = 0;
+    this.steerAngle = 0;
     this.lossOfControl = 0;
     this.impact = 0;
     this.prev = { x, y, z, yaw, pitch: 0 };
@@ -45,22 +53,29 @@ export class Player {
     if (!(dt > 0) || !Number.isFinite(dt)) return;
     const startingSurface = terrain?.sample(this.x, this.z) ?? null;
     const currentSpeed = Math.hypot(this.velX, this.velZ);
-    const speedRatio = Math.min(currentSpeed / MAX_SPEED, 1);
+    const speedRatio = Math.min(currentSpeed / SPEED_REFERENCE, 1);
     const velocityHeading = currentSpeed > 0.01 ? Math.atan2(-this.velX, -this.velZ) : this.yaw;
     this.driftAngle = wrapAngle(velocityHeading - this.yaw);
 
     if (Math.abs(this.driftAngle) > CONTROL_LOSS_ANGLE) this.lossOfControl = 0.55;
     else this.lossOfControl = Math.max(0, this.lossOfControl - dt);
     const controlScale = this.lossOfControl > 0 ? 0.28 : 1;
-    const turnRate = 2.2 - 1.3 * speedRatio;
-    this.yaw = wrapAngle(this.yaw - input.steer() * turnRate * controlScale * dt + input.consumeYawDelta());
+    // El manillar no obedece al instante: se carga al girar y vuelve solo al
+    // centro al soltar. A más velocidad, más resistencia a cambiar de rumbo.
+    const steerInput = input.steer();
+    const steerRate = steerInput === 0 ? STEER_RETURN_RATE : STEER_BUILD_RATE;
+    const steerStep = steerRate * dt;
+    this.steerAngle += Math.max(-steerStep, Math.min(steerStep, steerInput - this.steerAngle));
+    const turnRate = BASE_TURN_RATE * Math.max(0.45, 1 - 0.5 * speedRatio);
+    this.yaw = wrapAngle(this.yaw - this.steerAngle * turnRate * controlScale * dt + input.consumeYawDelta());
 
     let vx = this.velX;
     let vz = this.velZ;
     const throttle = input.throttle();
     if (throttle > 0) {
-      vx += -Math.sin(this.yaw) * ACCELERATION * throttle * dt;
-      vz += -Math.cos(this.yaw) * ACCELERATION * throttle * dt;
+      const pedal = PEDAL_ACCELERATION * Math.max(0.12, 1 - currentSpeed / PEDAL_FADE_SPEED);
+      vx += -Math.sin(this.yaw) * pedal * throttle * dt;
+      vz += -Math.cos(this.yaw) * pedal * throttle * dt;
     } else if (throttle < 0 && currentSpeed > 0.001) {
       const reduction = Math.min(currentSpeed, BRAKING * -throttle * dt);
       vx -= (vx / currentSpeed) * reduction;
@@ -74,7 +89,8 @@ export class Player {
     const maxGripTurn = gripRate * dt;
     const rotatedHeading = velocityHeadingAfterThrottle + Math.sign(velocityDelta) * Math.min(Math.abs(velocityDelta), maxGripTurn);
     if (newSpeed > 0.001) {
-      const retainedSpeed = Math.max(0, newSpeed - ROLLING_DRAG * dt);
+      const drag = ROLLING_DRAG + AERO_DRAG * newSpeed * newSpeed;
+      const retainedSpeed = Math.max(0, newSpeed - drag * dt);
       vx = -Math.sin(rotatedHeading) * retainedSpeed;
       vz = -Math.cos(rotatedHeading) * retainedSpeed;
       if (startingSurface?.onTrack && this.grounded) {
@@ -93,15 +109,9 @@ export class Player {
     }
     this.velX = vx;
     this.velZ = vz;
-    const rawSpeed = Math.hypot(vx, vz);
-    if (rawSpeed > MAX_SPEED) {
-      const scale = MAX_SPEED / rawSpeed;
-      this.velX *= scale;
-      this.velZ *= scale;
-      this.speed = MAX_SPEED;
-    } else {
-      this.speed = rawSpeed;
-    }
+    // Sin recorte duro: la velocidad sube mientras la resistencia y la
+    // pendiente lo permitan, y se estanca de forma progresiva.
+    this.speed = Math.hypot(vx, vz);
 
     const nextX = this.x + this.velX * dt;
     const nextZ = this.z + this.velZ * dt;

@@ -3,7 +3,8 @@
 export class Debug {
   constructor(element) {
     this.el = element;
-    this.visible = true;
+    this.visible = false;
+    if (this.el) this.el.style.display = 'none';
     this.fps = 0;
     this.worstMs = 0;
     this._frames = 0;
