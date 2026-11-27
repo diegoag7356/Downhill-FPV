@@ -50,7 +50,9 @@ export class RaceSession {
       this.checkpointIndex++;
       this.safe = { x: this.player.x, y: surface.height, z: this.player.z, yaw: this.player.yaw, s: surface.s };
     }
-    if (!surface.onShoulder && this.player.y < surface.height - 4) this.respawn();
+    // Solo se reaparece si la bici se sale del corredor o se cae por el talud.
+    if (!surface.inside && this.player.y < surface.height - 6) this.respawn();
+    else if (this.player.y < surface.centerHeight - 45) this.respawn();
     if (surface.onTrack && surface.s >= this.track.length - 5) this.finish();
     this.elapsedMs = this.now() - this.startedAt + this.penaltyMs;
   }

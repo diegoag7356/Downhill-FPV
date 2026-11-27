@@ -6,17 +6,13 @@ export function calculateDifficulty(track) {
   const jumps = track.jumps.map((jump) => ({ ...jump, airtime: Math.sqrt((2 * jump.height) / 9.81) * 2 }));
   const jumpDuration = jumps.reduce((sum, jump) => sum + jump.airtime, 0);
   const descending = Math.max(0, -track.metrics.meanGrade * 100);
-  const score = clamp(
-    track.metrics.totalTurn * 1.35 +
-      Math.max(0, 42 - tightestRadius) * 0.82 +
-      curves.length * 0.024 +
-      jumps.length * 8.5 +
-      jumpDuration * 2.2 +
-      Math.max(0, track.metrics.maxGrade * 100 - 7) * 0.4 +
-      descending * 0.15,
-    0,
-    100,
-  );
+  // Escala normalizada: curvas, saltos, pendiente y radio mínimo pesan en
+  // proporción a su rango real, sin saturar el 100.
+  const turnLoad = clamp(track.metrics.totalTurn / 26, 0, 1);
+  const jumpLoad = clamp(jumps.length / 8, 0, 1);
+  const steepLoad = clamp(descending / 28, 0, 1);
+  const tightLoad = clamp((110 - tightestRadius) / 80, 0, 1);
+  const score = clamp(100 * (turnLoad * 0.32 + jumpLoad * 0.3 + steepLoad * 0.24 + tightLoad * 0.14), 0, 100);
   return {
     score: round(score),
     totalTurn: round(track.metrics.totalTurn),
