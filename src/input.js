@@ -128,11 +128,11 @@ export class Input {
     return r;
   }
 
-  /** Pitch en el aire: +1 con W/arriba (morro arriba), -1 con S/abajo (morro abajo). */
+  /** Pitch en el aire: -1 con W/arriba (morro abajo), +1 con S/abajo (morro arriba). */
   airPitch() {
     let p = 0;
-    if (this.down('KeyW') || this.down('ArrowUp')) p += 1;
-    if (this.down('KeyS') || this.down('ArrowDown')) p -= 1;
+    if (this.down('KeyW') || this.down('ArrowUp')) p -= 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) p += 1;
     return p;
   }
 
